@@ -182,17 +182,34 @@ generate-check: generate ## Fail if the generated code is out of date
 # Tools
 # ---------------------------------------------------------------------------
 
+# Tools are built with the toolchain this repository targets, not with the one
+# each tool's own go.mod asks for.
+#
+# `go install pkg@version` resolves the toolchain from the *target* module's go
+# directive, so a tool pinned to an older Go gets built with that older Go —
+# and which one you get depends on the machine, which is how this went
+# unnoticed. For golangci-lint the difference is fatal rather than cosmetic: it
+# refuses to run when the Go it was built with is older than the version go.mod
+# targets, so a v2.7.1 release built with go1.25 cannot lint a module on 1.26.
+#
+# Naming the version explicitly makes the result identical everywhere. It is
+# read from go.mod rather than written twice, so bumping Go cannot leave this
+# behind. `local` would be wrong: contributors are not expected to have this
+# exact Go installed already, only to let the toolchain fetch it.
+GO_TOOLCHAIN := go$(shell awk '$$1 == "go" { print $$2; exit }' go.mod)
+GO_INSTALL   := GOTOOLCHAIN=$(GO_TOOLCHAIN) GOBIN=$(TOOLS) go install
+
 $(TOOLS)/buf:
-	GOBIN=$(TOOLS) go install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
+	$(GO_INSTALL) github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION)
 
 $(TOOLS)/protoc-gen-go:
-	GOBIN=$(TOOLS) go install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	$(GO_INSTALL) google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
 
 $(TOOLS)/protoc-gen-go-grpc:
-	GOBIN=$(TOOLS) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GRPC_VERSION)
+	$(GO_INSTALL) google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GRPC_VERSION)
 
 $(TOOLS)/golangci-lint:
-	GOBIN=$(TOOLS) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	$(GO_INSTALL) github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 
 .PHONY: tools
 tools: $(TOOLS)/buf $(TOOLS)/protoc-gen-go $(TOOLS)/protoc-gen-go-grpc $(TOOLS)/golangci-lint ## Install the pinned developer tools
