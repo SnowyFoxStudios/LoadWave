@@ -70,9 +70,17 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           check-latest: true
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.7.1
+
+      # `make lint` rather than golangci-lint-action, which installs a
+      # prebuilt binary. Those releases are built with whatever Go was current
+      # at the time, and golangci-lint refuses to run when its own Go is older
+      # than the version go.mod targets — so tracking a new Go release breaks
+      # the action until upstream ships a rebuild. Installing from source with
+      # this job's toolchain avoids the coupling, and has the better property
+      # that CI runs exactly what `make lint` runs locally, from the same
+      # pinned version.
+      - name: Lint
+        run: make lint
 
   proto:
     name: Protobuf

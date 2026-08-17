@@ -1,0 +1,13 @@
+This file keeps web/dist present in a fresh clone.
+
+package web embeds this directory with //go:embed, which is resolved at
+compile time and fails if the directory does not exist. The dashboard build
+output is not checked in, so without this placeholder `go build ./...` would
+fail on a clone that has never run a frontend build — and the Go side is
+meant to be workable with no Node toolchain installed at all.
+
+web.Assets() looks for index.html rather than for any file, so a clone
+holding only this placeholder reports "no dashboard built" and says how to
+build one, instead of serving an empty directory.
+
+Run `make ui` to populate this directory for real.
