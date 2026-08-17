@@ -1,0 +1,126 @@
+// Copyright the LoadWave Authors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+syntax = "proto3";
+
+package loadwave.v1;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/SnowyFoxStudios/LoadWave/gen/loadwave/v1;loadwavev1";
+
+// ExecutorType selects how LoadWave decides the number of active virtual
+// users over the lifetime of a run.
+enum ExecutorType {
+  EXECUTOR_TYPE_UNSPECIFIED = 0;
+  // Hold a fixed number of VUs for a fixed duration.
+  EXECUTOR_TYPE_CONSTANT_VUS = 1;
+  // Interpolate the VU count linearly between stage targets.
+  EXECUTOR_TYPE_RAMPING_VUS = 2;
+}
+
+// Stage is one leg of a ramping-vus profile. The VU count moves linearly from
+// whatever it was at the end of the previous stage to `target` over `duration`.
+message Stage {
+  google.protobuf.Duration duration = 1;
+  uint32 target = 2;
+}
+
+// LoadProfile describes the shape of the load over time. It is authored once
+// on the coordinator and apportioned across agents, which in turn apportion
+// their quota across worker processes.
+message LoadProfile {
+  ExecutorType executor = 1;
+
+  // constant-vus: the VU count to hold, and for how long.
+  uint32 vus = 2;
+  google.protobuf.Duration duration = 3;
+
+  // ramping-vus: the stages to walk through.
+  repeated Stage stages = 4;
+
+  // Global ceiling on scenario iterations started per second across the whole
+  // run, which is the arrival rate a closed-model run would otherwise leave
+  // implicit. Zero means unlimited, and the VU count alone governs. The
+  // coordinator divides this budget across agents.
+  //
+  // This throttles iterations rather than individual requests: a scenario
+  // issuing five requests per iteration at a limit of 100 produces roughly
+  // 500 requests per second.
+  uint32 max_iterations_per_second = 5;
+
+  // How long VUs are given to finish their in-flight iteration once the run
+  // is asked to stop before they are cancelled outright.
+  google.protobuf.Duration graceful_stop = 6;
+
+  // Stop the run after this many completed iterations across all VUs.
+  // Zero means the profile's duration governs instead.
+  uint64 iterations = 7;
+}
+
+// ScenarioRef picks a registered scenario and sets its relative share of
+// iterations. A VU picks a scenario per iteration, weighted by these values.
+message ScenarioRef {
+  string name = 1;
+  uint32 weight = 2;
+}
+
+// ThresholdStat is the aggregate a threshold is evaluated against.
+enum ThresholdStat {
+  THRESHOLD_STAT_UNSPECIFIED = 0;
+  THRESHOLD_STAT_COUNT = 1;
+  THRESHOLD_STAT_RATE = 2;
+  THRESHOLD_STAT_AVG = 3;
+  THRESHOLD_STAT_MIN = 4;
+  THRESHOLD_STAT_MAX = 5;
+  THRESHOLD_STAT_P50 = 6;
+  THRESHOLD_STAT_P90 = 7;
+  THRESHOLD_STAT_P95 = 8;
+  THRESHOLD_STAT_P99 = 9;
+  THRESHOLD_STAT_P999 = 10;
+}
+
+// ThresholdOp is the comparison applied as `stat op value`.
+enum ThresholdOp {
+  THRESHOLD_OP_UNSPECIFIED = 0;
+  THRESHOLD_OP_LT = 1;
+  THRESHOLD_OP_LTE = 2;
+  THRESHOLD_OP_GT = 3;
+  THRESHOLD_OP_GTE = 4;
+}
+
+// Threshold is a pass/fail assertion over an aggregated metric. A run that
+// breaches any threshold exits non-zero, which is what makes LoadWave usable
+// as a CI gate.
+message Threshold {
+  string metric = 1;
+  ThresholdStat stat = 2;
+  ThresholdOp op = 3;
+  double value = 4;
+  // Abort the run immediately on breach rather than only failing at the end.
+  bool abort_on_fail = 5;
+}
+
+// TestPlan is the complete, self-contained description of a run. Everything an
+// agent needs to execute its share is in here, so agents hold no prior state.
+message TestPlan {
+  string name = 1;
+  string base_url = 2;
+  LoadProfile load = 3;
+  repeated ScenarioRef scenarios = 4;
+  repeated Threshold thresholds = 5;
+  map<string, string> tags = 6;
+
+  // Worker processes each agent should spawn for this run. Zero lets the
+  // agent choose based on its core count.
+  uint32 workers_per_agent = 7;
+
+  // Verbatim YAML of the configuration this plan was built from.
+  //
+  // Workers need more than the structured fields above: the HTTP client
+  // settings, and the step definitions of any declaratively-authored
+  // scenario. Rather than mirror the whole configuration schema into
+  // protobuf — and have to keep the two in step forever — the original
+  // source travels with the plan and each worker parses it locally.
+  bytes config_yaml = 8;
+}

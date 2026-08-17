@@ -1,0 +1,311 @@
+@import 'tailwindcss';
+@import 'uplot/dist/uPlot.min.css';
+
+/*
+ * Design tokens.
+ *
+ * Light is the base, declared on bare :root. Dark is *selected* rather than
+ * derived — every value below is a step chosen against the dark surface, not
+ * an inversion of the light one — and is declared twice: once under the OS
+ * preference (guarded so an explicit light choice still wins) and once under
+ * the theme attribute the toggle sets, so the toggle beats the OS in both
+ * directions.
+ *
+ * Series colors are validated as a set for each mode; see
+ * docs/dashboard.md for the validator output. Do not adjust one in isolation.
+ */
+:root {
+  color-scheme: light;
+
+  --page: #f4f4f1;
+  --surface-1: #fcfcfb;
+  --surface-2: #f0efec;
+  --border: #e2e1db;
+  --border-strong: #cfcec7;
+
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #7a7873;
+
+  --accent: #2a78d6;
+  --accent-soft: #e8f0fc;
+
+  /* Single-series chart hues. */
+  --series-vus: #2a78d6;
+  --series-rps: #1baf7a;
+  --series-error: #d03b3b;
+
+  /* Ordered latency ramp. Percentiles have a natural order, so this is an
+     ordinal one-hue ramp rather than four categorical hues.
+     The ramp always runs toward *more contrast against the surface* as the
+     percentile rises, so the worst tail is the most prominent line. On a
+     light surface that means p99 is the darkest step. Validated with
+     --ordinal; see docs/dashboard.md. */
+  --lat-p50: #86b6ef;
+  --lat-p90: #5598e7;
+  --lat-p95: #2a78d6;
+  --lat-p99: #184f95;
+
+  /* HTTP status classes. These are genuinely status, so they wear
+     status-family hues rather than categorical slots. */
+  --status-2xx: #0ca30c;
+  --status-3xx: #2a78d6;
+  --status-4xx: #eda100;
+  --status-5xx: #d03b3b;
+  --status-err: #4a3aa7;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+
+  /* Categorical palette, for one line per endpoint. Assigned in fixed slot
+     order and never cycled: past eight, endpoints are dropped from the chart
+     rather than given a repeated hue. Validated as a set for the light
+     surface; three slots sit below 3:1, which the legend values and the
+     Requests table relieve. */
+  --cat-1: #2a78d6;
+  --cat-2: #eb6834;
+  --cat-3: #1baf7a;
+  --cat-4: #eda100;
+  --cat-5: #e87ba4;
+  --cat-6: #008300;
+  --cat-7: #4a3aa7;
+  --cat-8: #e34948;
+
+  --grid: #eceae5;
+  --axis: #b9b7b0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --page: #121211;
+    --surface-1: #1a1a19;
+    --surface-2: #232322;
+    --border: #2e2e2b;
+    --border-strong: #3d3d39;
+
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #8e8d85;
+
+    --accent: #3987e5;
+    --accent-soft: #16273d;
+
+    --series-vus: #3987e5;
+    --series-rps: #199e70;
+    --series-error: #d03b3b;
+
+    /* Inverted for the dark surface: p99 is the brightest step. Keeping the
+       light-mode direction would have put the most important line at 2.15:1
+       against the background, where it is genuinely hard to see. */
+    --lat-p50: #1c5cab;
+    --lat-p90: #2a78d6;
+    --lat-p95: #5598e7;
+    --lat-p99: #9ec5f4;
+
+    --status-2xx: #0ca30c;
+    --status-3xx: #3987e5;
+    --status-4xx: #c98500;
+    --status-5xx: #d03b3b;
+    --status-err: #9085e9;
+
+    --good: #0ca30c;
+    --warning: #fab219;
+    --critical: #d03b3b;
+
+    /* The same eight hues, stepped for the dark surface. */
+    --cat-1: #3987e5;
+    --cat-2: #d95926;
+    --cat-3: #199e70;
+    --cat-4: #c98500;
+    --cat-5: #d55181;
+    --cat-6: #008300;
+    --cat-7: #9085e9;
+    --cat-8: #e66767;
+
+    --grid: #262624;
+    --axis: #56564f;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --page: #121211;
+  --surface-1: #1a1a19;
+  --surface-2: #232322;
+  --border: #2e2e2b;
+  --border-strong: #3d3d39;
+
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8e8d85;
+
+  --accent: #3987e5;
+  --accent-soft: #16273d;
+
+  --series-vus: #3987e5;
+  --series-rps: #199e70;
+  --series-error: #d03b3b;
+
+  /* Inverted for the dark surface; see the note in the media-query block. */
+  --lat-p50: #1c5cab;
+  --lat-p90: #2a78d6;
+  --lat-p95: #5598e7;
+  --lat-p99: #9ec5f4;
+
+  --status-2xx: #0ca30c;
+  --status-3xx: #3987e5;
+  --status-4xx: #c98500;
+  --status-5xx: #d03b3b;
+  --status-err: #9085e9;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --critical: #d03b3b;
+
+  /* The same eight hues, stepped for the dark surface. */
+  --cat-1: #3987e5;
+  --cat-2: #d95926;
+  --cat-3: #199e70;
+  --cat-4: #c98500;
+  --cat-5: #d55181;
+  --cat-6: #008300;
+  --cat-7: #9085e9;
+  --cat-8: #e66767;
+
+  --grid: #262624;
+  --axis: #56564f;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-ink-2: var(--text-secondary);
+  --color-ink-3: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Columns of numbers must align; large standalone values must not. Tabular
+   figures are applied per-element rather than globally for that reason. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* uPlot ships a light-only stylesheet. Only the pieces that must follow the
+   theme are overridden; the rest of its layout is left alone. */
+.uplot,
+.uplot * {
+  font-family: inherit;
+}
+
+.u-cursor-x,
+.u-cursor-y {
+  border-color: var(--border-strong) !important;
+}
+
+.u-select {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+}
+
+/* Focus ring, consistent across every interactive element. */
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Crosshair tooltip, created imperatively by the uPlot plugin. */
+.lw-tooltip {
+  position: absolute;
+  z-index: 20;
+  pointer-events: none;
+  min-width: 8rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-1);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-primary);
+}
+
+.lw-tooltip-time {
+  margin-bottom: 0.25rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.lw-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+
+.lw-tooltip-label {
+  color: var(--text-secondary);
+}
+
+.lw-tooltip-value {
+  margin-left: auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lw-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 999px;
+}
+
+/* uPlot sizes itself to its container; this keeps it from collapsing before
+   the first ResizeObserver callback. */
+.lw-plot {
+  min-height: 1px;
+}

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/SnowyFoxStudios/LoadWave/discussions
+    about: Ask how something works, or propose an idea before building it.
+  - name: Security vulnerability
+    url: https://github.com/SnowyFoxStudios/LoadWave/security/advisories/new
+    about: Report privately. Please do not open a public issue.

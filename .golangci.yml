@@ -1,0 +1,133 @@
+version: "2"
+
+# Linter policy for LoadWave.
+#
+# The bar is: every enabled linter must be one a contributor can satisfy
+# without arguing with it. Anything that produces more noise than signal on
+# this codebase is off, with the reason recorded, so nobody has to rediscover
+# why by turning it on.
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/SnowyFoxStudios/LoadWave
+
+linters:
+  default: standard
+  enable:
+    - bodyclose # a leaked response body exhausts the connection pool, which
+      # in a load generator looks like the server getting slower
+    - contextcheck
+    - copyloopvar
+    - durationcheck
+    - errorlint
+    - exhaustive # a new protobuf enum value must not be silently ignored
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - noctx
+    - perfsprint
+    - prealloc
+    - predeclared
+    - revive
+    - rowserrcheck
+    - staticcheck
+    - testifylint
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - wastedassign
+    - whitespace
+
+  settings:
+    errcheck:
+      # Writing to a terminal, a tabwriter or an already-committed HTTP
+      # response has no useful recovery: the report is the output, and a
+      # branch at every call site would bury it. Closing an idle connection
+      # is the same.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*text/tabwriter.Writer).Flush
+
+    exhaustive:
+      default-signifies-exhaustive: true
+
+    govet:
+      enable-all: true
+      disable:
+        # Struct field alignment is not worth reordering fields that are
+        # grouped for readability.
+        - fieldalignment
+        # `err :=` inside an if or a new scope is ordinary Go. The check
+        # flags far more idiomatic code than genuine mistakes.
+        - shadow
+
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: unexported-return
+          disabled: true
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        # Both fight the "state the reason in a comment" style used
+        # throughout this codebase.
+        - commentFormatting
+        - ifElseChain
+        # Snapshots and summaries are passed by value deliberately: they are
+        # read-only views handed to renderers, and a pointer would invite a
+        # caller to mutate shared state to save a memcpy nobody can measure.
+        - hugeParam
+        # Naming results on a two-value return adds ceremony without adding
+        # information when the types already say it.
+        - unnamedResult
+
+    staticcheck:
+      checks:
+        - all
+        # Package comments in the "Package x ..." form are already required by
+        # revive's exported rule; ST1000 additionally demands them on every
+        # file, which is noise.
+        - -ST1000
+
+  exclusions:
+    rules:
+      # Tests do things production code should not: long functions, magic
+      # numbers, deliberate error paths.
+      - path: _test\.go
+        linters:
+          - dupl
+          - errcheck
+          - gocritic
+          - noctx
+          - prealloc
+          - unparam
+
+      # Generated protobuf code is not ours to lint.
+      - path: ^gen/
+        linters:
+          - all
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

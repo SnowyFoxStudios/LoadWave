@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>{{ .Run.Name }} — LoadWave report</title>
+    <style>
+      /*
+       * Everything is inline and static. No script, no external stylesheet,
+       * no web font: this file has to render the same in an email client, in
+       * an attachment, and in two years' time with no network.
+       *
+       * Light is the base; dark is a selected set of steps for the dark
+       * surface, not an inversion. Series colours are validated for contrast
+       * and colour-vision deficiency as a set — do not change one alone.
+       */
+      :root {
+        color-scheme: light;
+        --page: #f4f4f1;
+        --surface: #fcfcfb;
+        --surface-2: #f0efec;
+        --line: #e2e1db;
+        --line-strong: #cfcec7;
+        --ink: #0b0b0b;
+        --ink-2: #52514e;
+        --ink-3: #7a7873;
+        --accent: #2a78d6;
+        --good: #0ca30c;
+        --warning: #b07800;
+        --critical: #d03b3b;
+        --grid: #eceae5;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --page: #121211;
+          --surface: #1a1a19;
+          --surface-2: #232322;
+          --line: #2e2e2b;
+          --line-strong: #3d3d39;
+          --ink: #ffffff;
+          --ink-2: #c3c2b7;
+          --ink-3: #8e8d85;
+          --accent: #3987e5;
+          --good: #0ca30c;
+          --warning: #fab219;
+          --critical: #e66767;
+          --grid: #262624;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem 4rem;
+        background: var(--page);
+        color: var(--ink);
+        font:
+          15px/1.5 ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      main {
+        max-width: 72rem;
+        margin: 0 auto;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 1.5rem;
+      }
+      h2 {
+        margin: 2.5rem 0 0.75rem;
+        font-size: 1.05rem;
+      }
+
+      .sub {
+        color: var(--ink-3);
+        font-size: 0.85rem;
+      }
+      .tnum {
+        font-variant-numeric: tabular-nums;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.82rem;
+      }
+
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding-bottom: 1rem;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+      }
+
+      /* The verdict wears an explicit word as well as a colour, so it survives
+         greyscale printing and colour-vision deficiency. */
+      .verdict {
+        padding: 0.9rem 1.1rem;
+        margin: 1.25rem 0 0;
+        border: 1px solid var(--line-strong);
+        border-left-width: 4px;
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      .verdict strong {
+        display: block;
+        font-size: 1.05rem;
+      }
+      .verdict.pass {
+        border-left-color: var(--good);
+      }
+      .verdict.fail {
+        border-left-color: var(--critical);
+      }
+
+      .warn {
+        padding: 0.7rem 1rem;
+        margin-top: 0.6rem;
+        border: 1px solid var(--warning);
+        border-radius: 8px;
+        color: var(--ink-2);
+        font-size: 0.85rem;
+      }
+
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+        gap: 0.6rem;
+        margin-top: 1rem;
+      }
+      .fact {
+        padding: 0.7rem 0.85rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      .fact .k {
+        color: var(--ink-3);
+        font-size: 0.7rem;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .fact .v {
+        font-size: 1.35rem;
+        font-weight: 600;
+      }
+      .fact .d {
+        color: var(--ink-3);
+        font-size: 0.75rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .charts {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(28rem, 1fr));
+        gap: 0.75rem;
+      }
+      figure {
+        margin: 0;
+        padding: 0.75rem 0.9rem 0.6rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+      figcaption {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 0.35rem;
+      }
+      figcaption b {
+        font-size: 0.9rem;
+      }
+
+      .chart {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .chart .grid {
+        stroke: var(--grid);
+        stroke-width: 1;
+      }
+      .chart .line {
+        stroke-width: 2;
+        stroke-linejoin: round;
+        stroke-linecap: round;
+      }
+      /* A surface-coloured edge is what separates adjacent stacked bands. */
+      .chart .band-edge {
+        stroke-width: 2;
+      }
+      .chart .ylabel {
+        fill: var(--ink-3);
+        font-size: 10px;
+        text-anchor: end;
+      }
+      .chart .xlabel {
+        fill: var(--ink-3);
+        font-size: 10px;
+      }
+
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.9rem;
+        margin: 0.4rem 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 0.78rem;
+      }
+      .legend li {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+      }
+      .swatch {
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        flex: none;
+      }
+      .legend .val {
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        overflow: hidden;
+        font-size: 0.85rem;
+      }
+      th,
+      td {
+        padding: 0.45rem 0.7rem;
+        text-align: right;
+        border-bottom: 1px solid var(--line);
+      }
+      th:first-child,
+      td:first-child,
+      th.msg,
+      td.msg {
+        text-align: left;
+      }
+      thead th {
+        color: var(--ink-3);
+        font-size: 0.7rem;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+      td.num {
+        font-variant-numeric: tabular-nums;
+      }
+      td.bad {
+        color: var(--critical);
+        font-weight: 600;
+      }
+      td.msg {
+        max-width: 26rem;
+        text-align: left;
+        color: var(--ink-2);
+        word-break: break-word;
+      }
+
+      .tag {
+        display: inline-block;
+        padding: 0.05rem 0.45rem;
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 600;
+      }
+      .tag.pass {
+        border-color: var(--good);
+        color: var(--good);
+      }
+      .tag.fail {
+        border-color: var(--critical);
+        color: var(--critical);
+      }
+      .tag.skip {
+        color: var(--ink-3);
+      }
+
+      .empty {
+        padding: 1.25rem;
+        border: 1px dashed var(--line-strong);
+        border-radius: 8px;
+        color: var(--ink-3);
+        font-size: 0.85rem;
+        text-align: center;
+      }
+
+      dl.meta {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 0.3rem 1rem;
+        margin: 0;
+        font-size: 0.85rem;
+      }
+      dl.meta dt {
+        color: var(--ink-3);
+      }
+      dl.meta dd {
+        margin: 0;
+        word-break: break-word;
+      }
+
+      footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        color: var(--ink-3);
+        font-size: 0.78rem;
+      }
+
+      @media print {
+        body {
+          padding: 0;
+          background: #fff;
+        }
+        figure,
+        table {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <main>
+      <header>
+        <div class="brand">
+          <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true">
+            <path
+              d="M2 20c4 0 4-8 8-8s4 8 8 8 4-8 8-8 4 8 4 8"
+              fill="none"
+              stroke="var(--accent)"
+              stroke-width="3"
+              stroke-linecap="round"
+            />
+          </svg>
+          <div>
+            <h1>{{ .Run.Name }}</h1>
+            <p class="sub">LoadWave report · {{ stamp .Generated }}</p>
+          </div>
+        </div>
+        <dl class="meta">
+          <dt>Profile</dt>
+          <dd>{{ .Run.Profile }}</dd>
+          {{ if .Run.BaseURL }}
+            <dt>Target</dt>
+            <dd class="mono">{{ .Run.BaseURL }}</dd>
+          {{ end }}
+          <dt>Duration</dt>
+          <dd class="tnum">{{ seconds .Run.ElapsedSec }}</dd>
+          <dt>Agents</dt>
+          <dd class="tnum">{{ len .Run.Participants }}</dd>
+          <dt>Run</dt>
+          <dd class="mono">{{ .Run.ID }}</dd>
+        </dl>
+      </header>
+
+      <div class="verdict {{ if .Verdict.Passed }}pass{{ else }}fail{{ end }}">
+        <strong>{{ .Verdict.Label }}</strong>
+        <span class="sub">{{ .Verdict.Detail }}</span>
+      </div>
+
+      {{ range .Warnings }}
+        <p class="warn"><strong>Incomplete data.</strong> {{ . }}</p>
+      {{ end }}
+
+      <div class="facts">
+        {{ range .Headline }}
+          <div class="fact">
+            <div class="k">{{ .Label }}</div>
+            <div class="v">{{ .Value }}</div>
+            {{ if .Detail }}<div class="d">{{ .Detail }}</div>{{ end }}
+          </div>
+        {{ end }}
+      </div>
+
+      {{ if .Charts }}
+        <h2>Over time</h2>
+        <div class="charts">
+          {{ range .Charts }}
+            <figure>
+              <figcaption>
+                <b>{{ .Title }}</b>
+                <span class="sub">{{ .Hint }}</span>
+              </figcaption>
+              {{ .SVG }}
+              <ul class="legend">
+                {{ range .Legend }}
+                  <li>
+                    <span class="swatch" style="background: {{ .Color }}"></span>
+                    <span class="sub">{{ .Label }}</span>
+                    <span class="val">{{ .Value }}</span>
+                  </li>
+                {{ end }}
+              </ul>
+            </figure>
+          {{ end }}
+        </div>
+        {{ if .OmittedEnds }}
+          <p class="sub">
+            The response-time chart shows the busiest endpoints. {{ .OmittedEnds }} further
+            {{ if eq .OmittedEnds 1 }}endpoint is{{ else }}endpoints are{{ end }} listed in the
+            table below.
+          </p>
+        {{ end }}
+      {{ end }}
+
+      <h2>Thresholds</h2>
+      {{ if .Thresholds }}
+        <table>
+          <thead>
+            <tr>
+              <th>Assertion</th>
+              <th>Observed</th>
+              <th>Result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Thresholds }}
+              <tr>
+                <td class="mono">{{ .Description }}</td>
+                <td class="num">
+                  {{ if .Evaluated }}{{ printf "%.4g" .Actual }}{{ else }}—{{ end }}
+                </td>
+                <td>
+                  {{ if not .Evaluated }}
+                    <span class="tag skip">not measured</span>
+                  {{ else if .Passed }}
+                    <span class="tag pass">pass</span>
+                  {{ else }}
+                    <span class="tag fail">fail</span>
+                  {{ end }}
+                </td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      {{ else }}
+        <p class="empty">
+          No thresholds were defined, so this run has no pass or fail criteria.
+        </p>
+      {{ end }}
+
+      <h2>Requests by endpoint</h2>
+      {{ if .Endpoints }}
+        <table>
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Count</th>
+              <th>Avg</th>
+              <th>p95</th>
+              <th>p99</th>
+              <th>Max</th>
+              <th>Errors</th>
+              <th>Received</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Endpoints }}
+              <tr>
+                <td class="mono">{{ .Name }}</td>
+                <td class="num">{{ count .Requests }}</td>
+                <td class="num">{{ millis .Avg }}</td>
+                <td class="num">{{ millis (index .Percentiles "p95") }}</td>
+                <td class="num">{{ millis (index .Percentiles "p99") }}</td>
+                <td class="num">{{ millis .Max }}</td>
+                <td class="num {{ if gt .ErrorRate 0.0 }}bad{{ end }}">{{ percent .ErrorRate }}</td>
+                <td class="num">{{ bytes .BytesIn }}</td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      {{ else }}
+        <p class="empty">No requests were recorded.</p>
+      {{ end }}
+
+      <h2>Failed requests</h2>
+      {{ if .Failures }}
+        <table>
+          <thead>
+            <tr>
+              <th>Request</th>
+              <th>Code</th>
+              <th>Count</th>
+              <th class="msg">Message</th>
+              <th>Last seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Failures }}
+              <tr>
+                <td class="mono">{{ .Name }}</td>
+                <td><span class="tag fail">{{ code . }}</span></td>
+                <td class="num">{{ count .Count }}</td>
+                <td class="msg mono">{{ if .Message }}{{ .Message }}{{ else }}—{{ end }}</td>
+                <td class="num">{{ since .LastSeen }}</td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      {{ else }}
+        <p class="empty">No failures were recorded. Every request was judged successful.</p>
+      {{ end }}
+
+      {{ if .Agents }}
+        <h2>Agents</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Agent</th>
+              <th>Host</th>
+              <th>Cores</th>
+              <th>Workers</th>
+              <th>Peak VUs</th>
+              <th>Version</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Agents }}
+              <tr>
+                <td class="mono">{{ .ID }}</td>
+                <td>{{ .Hostname }}</td>
+                <td class="num">{{ .Cores }}</td>
+                <td class="num">{{ .HealthyWorkers }}</td>
+                <td class="num">{{ .VUQuota }}</td>
+                <td class="mono">{{ .Version }}</td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      {{ end }}
+
+      {{ if .Events }}
+        <h2>Events</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Level</th>
+              <th class="msg">Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{ range .Events }}
+              <tr>
+                <td class="num">{{ since .Time }}</td>
+                <td>{{ .Level }}</td>
+                <td class="msg">{{ .Message }}{{ if .Source }} · {{ .Source }}{{ end }}</td>
+              </tr>
+            {{ end }}
+          </tbody>
+        </table>
+      {{ end }}
+
+      <footer>
+        Generated by LoadWave {{ .Version }} at {{ stamp .Generated }}. This file is
+        self-contained: no scripts, no external assets, no network required.
+      </footer>
+    </main>
+  </body>
+</html>

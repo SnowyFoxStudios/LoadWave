@@ -1,0 +1,198 @@
+// Copyright the LoadWave Authors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+syntax = "proto3";
+
+package loadwave.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "loadwave/v1/metrics.proto";
+import "loadwave/v1/plan.proto";
+
+option go_package = "github.com/SnowyFoxStudios/LoadWave/gen/loadwave/v1;loadwavev1";
+
+// RunPhase is the lifecycle state of a run, tracked identically on the
+// coordinator, on each agent, and in each worker.
+enum RunPhase {
+  RUN_PHASE_UNSPECIFIED = 0;
+  RUN_PHASE_PENDING = 1;
+  RUN_PHASE_STARTING = 2;
+  RUN_PHASE_RUNNING = 3;
+  RUN_PHASE_STOPPING = 4;
+  RUN_PHASE_COMPLETED = 5;
+  RUN_PHASE_FAILED = 6;
+  RUN_PHASE_ABORTED = 7;
+}
+
+enum LogLevel {
+  LOG_LEVEL_UNSPECIFIED = 0;
+  LOG_LEVEL_DEBUG = 1;
+  LOG_LEVEL_INFO = 2;
+  LOG_LEVEL_WARN = 3;
+  LOG_LEVEL_ERROR = 4;
+}
+
+// LogEvent forwards a notable event from a worker or agent up to the
+// coordinator so it can surface in the dashboard rather than only in a log
+// file on some other host.
+message LogEvent {
+  google.protobuf.Timestamp time = 1;
+  LogLevel level = 2;
+  string node_id = 3;
+  string run_id = 4;
+  string message = 5;
+  map<string, string> fields = 6;
+}
+
+// RunStatusUpdate reports a node's view of a run's progress.
+message RunStatusUpdate {
+  string run_id = 1;
+  RunPhase phase = 2;
+  string message = 3;
+  uint32 active_vus = 4;
+  uint64 completed_iterations = 5;
+}
+
+// NodeHello is the first message on a control stream. It advertises what the
+// node is and what it can carry, so the coordinator can apportion load in
+// proportion to real capacity rather than assuming every node is identical.
+message NodeHello {
+  string node_id = 1;
+  string hostname = 2;
+  string version = 3;
+  uint32 cpu_cores = 4;
+  // Worker processes this node is willing to run.
+  uint32 max_workers = 5;
+  // Virtual users this node is willing to carry, across all its workers.
+  uint32 max_vus = 6;
+  map<string, string> labels = 7;
+}
+
+// NodeHeartbeat is sent on a fixed interval. Missing several in a row is how
+// the coordinator detects a partitioned or dead node.
+message NodeHeartbeat {
+  int64 sequence = 1;
+  uint32 active_vus = 2;
+  uint32 healthy_workers = 3;
+  double cpu_percent = 4;
+  uint64 mem_bytes = 5;
+  google.protobuf.Timestamp sent_at = 6;
+}
+
+// NodeUp is anything a node sends upstream to its supervisor. Agents send it
+// to the coordinator; workers send it to their agent.
+message NodeUp {
+  oneof payload {
+    NodeHello hello = 1;
+    NodeHeartbeat heartbeat = 2;
+    MetricBatch metrics = 3;
+    RunStatusUpdate run_status = 4;
+    LogEvent log = 5;
+    Pong pong = 6;
+  }
+}
+
+// Accepted confirms a node has joined and tells it how to behave.
+message Accepted {
+  string assigned_node_id = 1;
+  google.protobuf.Duration heartbeat_interval = 2;
+  google.protobuf.Duration metrics_interval = 3;
+  string supervisor_version = 4;
+}
+
+// StartRun instructs a node to begin executing its share of a run.
+message StartRun {
+  string run_id = 1;
+  TestPlan plan = 2;
+  // VUs this node is responsible for at peak. The node scales within this
+  // ceiling as the profile ramps.
+  uint32 vu_quota = 3;
+  // Worker processes to spawn. Meaningful for agents; ignored by workers.
+  uint32 worker_count = 4;
+  // Iterations per second this node may start, zero for unlimited.
+  uint32 iteration_rate_quota = 5;
+
+  // Total iterations this node should complete before stopping, zero for
+  // unbounded. Set only when the plan caps total iterations.
+  uint64 iteration_quota = 9;
+  // Wall-clock instant at which every node should consider the run started,
+  // so ramp curves line up across hosts despite staggered delivery.
+  google.protobuf.Timestamp start_at = 6;
+  // This node's index and the total node count, used to deterministically
+  // partition shared test data without any cross-node coordination.
+  uint32 shard_index = 7;
+  uint32 shard_count = 8;
+
+  // First virtual user id this node may allocate. The supervisor hands out
+  // non-overlapping ranges so that every VU in a distributed run has a
+  // globally unique id without any node having to ask for one.
+  int64 vu_id_base = 10;
+}
+
+// SetQuota rebalances a running node's share, either because the operator
+// scaled the run or because another node joined or died.
+message SetQuota {
+  string run_id = 1;
+  uint32 vu_quota = 2;
+  uint32 iteration_rate_quota = 3;
+
+  // How long the node should take to reach the new virtual user quota.
+  //
+  // Zero means immediately, which is what a rebalance after an agent is lost
+  // wants: the surviving nodes should pick up the missing load now, not in a
+  // minute. An operator changing the target usually wants the opposite —
+  // spawning several hundred users in one tick is a step change that tells
+  // you how the service handles a thundering herd, not how it handles the
+  // load level you asked for.
+  google.protobuf.Duration ramp = 4;
+}
+
+// StopRun ends a run. A graceful stop lets in-flight iterations finish within
+// the plan's graceful_stop window; a non-graceful stop cancels immediately.
+message StopRun {
+  string run_id = 1;
+  bool graceful = 2;
+  string reason = 3;
+}
+
+message Ping {
+  int64 nonce = 1;
+  google.protobuf.Timestamp sent_at = 2;
+}
+
+message Pong {
+  int64 nonce = 1;
+  google.protobuf.Timestamp sent_at = 2;
+}
+
+// NodeDown is anything a supervisor sends downstream to a node.
+message NodeDown {
+  oneof payload {
+    Accepted accepted = 1;
+    StartRun start_run = 2;
+    SetQuota set_quota = 3;
+    StopRun stop_run = 4;
+    Ping ping = 5;
+  }
+}
+
+// ControlService is the single RPC that ties the cluster together.
+//
+// The node always dials its supervisor and holds one long-lived bidirectional
+// stream open. Commands travel down it and telemetry travels up it. Because
+// the connection is outbound from the node, agents work from behind NAT and
+// through egress-only firewalls with no inbound ports, and a broken stream is
+// an unambiguous signal that the node is gone.
+//
+// The same service is used at both tiers: agents speak it to the coordinator
+// over TCP, and worker processes speak it to their local agent over a Unix
+// domain socket.
+service ControlService {
+  // The envelope names describe direction rather than the RPC, because the
+  // same pair is reused for the agent tier and the worker tier. JoinRequest /
+  // JoinResponse would obscure that symmetry.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Join(stream NodeUp) returns (stream NodeDown);
+}
