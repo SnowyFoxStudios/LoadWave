@@ -1,0 +1,70 @@
+# Configuration for the Go SDK example.
+#
+# The scenarios here have no `steps`: they refer to scenarios compiled into the
+# binary by examples/checkout/main.go. This is the usual split — behaviour in
+# Go, where it can be tested and reviewed like any other code; load shape and
+# pass/fail criteria in YAML, where they can be varied per environment without
+# a rebuild.
+#
+#     go build -o checkout ./examples/checkout
+#     ./checkout run examples/checkout/checkout.yaml --ui
+
+name: storefront-checkout
+baseURL: https://staging.example.com
+
+load:
+  executor: ramping-vus
+  stages:
+    - { duration: 2m, target: 200 } # ramp
+    - { duration: 10m, target: 200 } # soak at the target load
+    - { duration: 3m, target: 500 } # push past it, looking for the knee
+    - { duration: 2m, target: 0 } # ramp down
+  gracefulStop: 30s
+
+# Four worker processes per machine. Past a few thousand virtual users one Go
+# runtime's scheduler and garbage collector, not the target, become the
+# bottleneck; splitting the pool across processes buys that headroom back.
+workersPerAgent: 4
+
+# Pause after every request, whatever its outcome — the run's pacing floor,
+# and what stops a failing endpoint being hammered in a tight loop. Omitting
+# it applies one second; "0" means flat out.
+betweenRequests: 1s-3s
+
+http:
+  timeout: 20s
+  headers:
+    Accept: application/json
+    User-Agent: LoadWave/storefront-checkout
+  # Off by default. A load test usually wants to measure the redirect itself
+  # rather than quietly follow it and attribute the cost to the first request.
+  followRedirects: false
+
+tags:
+  env: staging
+  suite: checkout
+
+thresholds:
+  # Durations are in milliseconds.
+  - { metric: http_req_duration, stat: p95, op: "<", value: 800 }
+  - { metric: http_req_duration, stat: p99, op: "<", value: 2000 }
+
+  # Rates are fractions of one.
+  - { metric: http_req_failed, stat: rate, op: "<", value: 0.01 }
+  - { metric: checks, stat: rate, op: ">", value: 0.99 }
+
+  # An error rate this high means the environment is broken, not slow, and
+  # there is nothing to learn from finishing the run.
+  - { metric: http_req_failed, stat: rate, op: "<", value: 0.25, abortOnFail: true }
+
+  # The custom metric emitted by the checkout scenario, treated exactly like a
+  # built-in one.
+  - { metric: cart_value, stat: p50, op: ">", value: 0 }
+
+scenarios:
+  # Weights set here override the ones declared in Go, so the traffic mix can
+  # be retuned per environment without rebuilding.
+  - name: browse
+    weight: 4
+  - name: checkout
+    weight: 1

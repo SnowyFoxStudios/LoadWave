@@ -1,0 +1,32 @@
+# Build output
+/bin/
+/.tools/
+coverage.out
+coverage.html
+*.test
+
+# `go build ./examples/...` drops a binary named after each package into the
+# working directory. Use `go build -o` instead, but do not commit the strays.
+/loadwave
+/checkout
+
+# The dashboard build is embedded at compile time and rebuilt by `make ui`.
+# The placeholder keeps the directory present so `//go:embed` still resolves
+# in a fresh clone that has never run a frontend build.
+/web/dist/*
+!/web/dist/.gitkeep
+
+# Frontend
+node_modules/
+.vite/
+*.tsbuildinfo
+
+# Run artefacts
+*.loadwave.json
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

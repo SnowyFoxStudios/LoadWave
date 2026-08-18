@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+# A new push to a pull request makes the previous run's result irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Kept in step with go.mod's toolchain directive and .nvmrc.
+  GO_VERSION: "1.26.6"
+  NODE_VERSION: "26.7.0"
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      # Deliberately no `npm ci` in this job. node_modules ships stray Go
+      # files in a few packages, which `go build ./...` would then try to
+      # compile; keeping the Go job free of it avoids the problem entirely.
+      # The dashboard is built and embedded in the `build` job instead.
+      - name: Verify formatting
+        run: |
+          unformatted=$(gofmt -l cmd internal pkg examples web/embed.go)
+          if [[ -n "$unformatted" ]]; then
+            echo "::error::these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Verify go.mod is tidy
+        run: |
+          go mod tidy
+          if ! git diff --quiet go.mod go.sum; then
+            echo "::error::go.mod or go.sum is not tidy; run 'go mod tidy' and commit the result"
+            git --no-pager diff go.mod go.sum
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./cmd/... ./internal/... ./pkg/... ./examples/...
+
+      - name: Test
+        # The integration suite spawns real worker subprocesses, so the race
+        # detector here covers the actual distributed path, not a simulation.
+        run: go test -race -timeout 15m ./cmd/... ./internal/... ./pkg/... ./examples/...
+
+  lint-go:
+    name: Lint (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      # `make lint` rather than golangci-lint-action, which installs a
+      # prebuilt binary. Those releases are built with whatever Go was current
+      # at the time, and golangci-lint refuses to run when its own Go is older
+      # than the version go.mod targets — so tracking a new Go release breaks
+      # the action until upstream ships a rebuild. Installing from source with
+      # this job's toolchain avoids the coupling, and has the better property
+      # that CI runs exactly what `make lint` runs locally, from the same
+      # pinned version.
+      - name: Lint
+        run: make lint
+
+  proto:
+    name: Protobuf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - name: Install the pinned generators
+        run: make tools
+
+      - name: Lint
+        run: .tools/buf lint
+
+      - name: Verify the generated code is current
+        # Generated code is committed so that `go get` works without a
+        # protobuf toolchain. That only holds if it never drifts from the
+        # .proto files.
+        run: |
+          .tools/buf generate
+          if ! git diff --quiet gen; then
+            echo "::error::generated code is out of date; run 'make generate' and commit the result"
+            git --no-pager diff --stat gen
+            exit 1
+          fi
+
+  web:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the dashboard
+        run: npm --prefix web ci && npm --prefix web run build
+
+      - name: Build the binary with the dashboard embedded
+        run: go build -trimpath -o loadwave ./cmd/loadwave
+
+      # The binary is the deliverable, so prove it actually starts and can
+      # parse a configuration on every platform we claim to support.
+      - name: Smoke test
+        shell: bash
+        run: |
+          ./loadwave version
+          ./loadwave validate examples/basic.yaml

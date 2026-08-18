@@ -1,0 +1,115 @@
+// Copyright the LoadWave Authors.
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+syntax = "proto3";
+
+package loadwave.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/SnowyFoxStudios/LoadWave/gen/loadwave/v1;loadwavev1";
+
+// HistogramSnapshot carries an HDR histogram across the wire.
+//
+// Percentiles cannot be averaged, so distributed runs must ship the whole
+// distribution and merge it centrally. HDR histograms merge losslessly, which
+// is what makes a p99 computed over ten agents actually correct.
+message HistogramSnapshot {
+  int64 lowest_trackable_value = 1;
+  int64 highest_trackable_value = 2;
+  int32 significant_figures = 3;
+
+  // Bucket counts, run-length encoded: a zero is followed by the length of
+  // the zero run. Non-zero values stand alone. HDR count arrays are mostly
+  // empty, so this typically shrinks the payload by one to two orders of
+  // magnitude.
+  repeated int64 counts_rle = 4;
+
+  int64 total_count = 5;
+}
+
+// MetricKind tells the merger how to combine two deltas for the same series.
+enum MetricKind {
+  METRIC_KIND_UNSPECIFIED = 0;
+  // Monotonic totals: requests, iterations, bytes. Deltas add.
+  METRIC_KIND_COUNTER = 1;
+  // Point-in-time values: active VUs. Deltas add across nodes, replace in time.
+  METRIC_KIND_GAUGE = 2;
+  // Distributions: latency. Deltas merge via the histogram.
+  METRIC_KIND_TREND = 3;
+  // Success/failure ratios, carried as count plus non-zero count.
+  METRIC_KIND_RATE = 4;
+}
+
+// SeriesDelta is one metric's activity within a single time bucket on a single
+// node. It is a delta, never a running total, so that a dropped batch costs
+// one bucket rather than corrupting every bucket after it.
+message SeriesDelta {
+  string metric = 1;
+  MetricKind kind = 2;
+  map<string, string> tags = 3;
+
+  uint64 count = 4;
+  double sum = 5;
+  double min = 6;
+  double max = 7;
+
+  // Populated for TREND metrics only.
+  HistogramSnapshot histogram = 8;
+
+  // Populated for RATE metrics: how many of `count` observations were truthy.
+  uint64 non_zero = 9;
+}
+
+// FailureSample explains one kind of failure, rather than merely counting it.
+//
+// Metrics can say that 3% of requests failed; they cannot say why. This
+// carries the missing half — the status, the transport error class, and a
+// short excerpt of what the server actually said — so an operator does not
+// have to go and reproduce the failure by hand to find out.
+//
+// Samples are aggregated by their bounded fields and capped per node. The
+// message is captured only the first time a given kind of failure is seen,
+// which keeps a run where everything fails from spending its time copying
+// error strings.
+message FailureSample {
+  // The request's metric name, already collapsed to bounded cardinality.
+  string name = 1;
+  string method = 2;
+
+  // HTTP status, or 0 when no response arrived.
+  int32 status = 3;
+
+  // Transport failure classification: "timeout", "connection_refused" and
+  // the like. Empty when a response was received.
+  string error_class = 4;
+
+  // A short, truncated excerpt of the response body or the transport error.
+  // Never the whole body: this is a hint for a human, not a payload.
+  string message = 5;
+
+  uint64 count = 6;
+  google.protobuf.Timestamp last_seen = 7;
+}
+
+// MetricBatch is one node's complete report for one time bucket.
+message MetricBatch {
+  string run_id = 1;
+  string node_id = 2;
+
+  google.protobuf.Timestamp bucket_start = 3;
+  google.protobuf.Duration bucket_width = 4;
+
+  repeated SeriesDelta series = 5;
+
+  // Instantaneous VU count on this node at the close of the bucket.
+  uint32 active_vus = 6;
+
+  // Samples the node had to discard because its buffer was full. Non-zero
+  // here means the reported numbers understate reality and the UI says so.
+  uint64 dropped_samples = 7;
+
+  // What went wrong during this bucket, and why.
+  repeated FailureSample failures = 8;
+}

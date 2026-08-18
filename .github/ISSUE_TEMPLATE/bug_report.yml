@@ -1,0 +1,58 @@
+name: Bug report
+description: Something behaves differently from how it is documented.
+labels: [bug, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. The most useful bug report is one somebody
+        else can reproduce, so the configuration and the output matter more
+        than the prose.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: >
+        The test configuration or Go scenario, reduced to the smallest version
+        that still shows the problem. Redact any hostnames or credentials.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command, and the output with `--log-level debug`.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `loadwave version`.
+      placeholder: loadwave v0.1.0 (abc123) go1.26.6 linux/amd64
+    validations:
+      required: true
+
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Topology
+      options:
+        - Single machine (loadwave run)
+        - Single machine with the dashboard (loadwave serve)
+        - Several machines (coordinator plus remote agents)
+    validations:
+      required: true

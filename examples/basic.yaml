@@ -1,0 +1,85 @@
+# A complete LoadWave test, written declaratively.
+#
+# It expects a service on the base URL below with /api/products endpoints.
+# To see LoadWave working with no service at all, run `loadwave demo` instead —
+# it starts a target of its own and runs a test very like this one.
+#
+#     loadwave run examples/basic.yaml          # print a report and exit
+#     loadwave run examples/basic.yaml --ui     # ...and watch it in a browser
+#     loadwave run examples/basic.yaml --url http://localhost:3000
+#
+# The --url flag overrides baseURL, so one file can serve several environments.
+
+name: storefront-browse
+baseURL: http://127.0.0.1:8080
+
+load:
+  executor: ramping-vus
+  stages:
+    - { duration: 5s, target: 20 } # ramp up
+    - { duration: 10s, target: 20 } # hold
+    - { duration: 5s, target: 0 } # ramp down
+  gracefulStop: 10s
+
+# Each agent spreads its share of the virtual users across this many worker
+# processes. More processes means more Go schedulers and garbage collectors,
+# which is what lets one machine push past a few thousand VUs.
+workersPerAgent: 2
+
+# Pause after every request, whatever its outcome. This is the run's pacing
+# floor: without it a scenario loops as fast as the network allows, and one
+# whose request fails instantly loops as fast as the CPU allows.
+#
+# One second is the default if this is omitted. A range rather than a fixed
+# value keeps virtual users from marching in lockstep. Set it to "0" for a
+# throughput test, where flat out is the point.
+betweenRequests: 500ms-1s
+
+http:
+  timeout: 10s
+  headers:
+    Accept: application/json
+
+tags:
+  env: local
+
+# The run exits non-zero if any of these fail, which is what makes it usable
+# as a CI gate. Durations are in milliseconds; rates are fractions of one.
+thresholds:
+  - { metric: http_req_duration, stat: p95, op: "<", value: 500 }
+  - { metric: http_req_failed, stat: rate, op: "<", value: 0.1 }
+  - { metric: checks, stat: rate, op: ">", value: 0.9 }
+
+scenarios:
+  - name: browse
+    weight: 3
+    description: List products, then open one of them.
+    steps:
+      - name: list products
+        get: /api/products
+        expect: [200]
+        # Pull a value out of the JSON response and reuse it below.
+        capture:
+          productId: items.0.id
+
+      # Real users read the page before clicking. Constant think times make
+      # virtual users march in lockstep and produce artificial spikes, so
+      # this is a range.
+      - think: 200ms-800ms
+
+      - name: view product
+        get: /api/products/${productId}
+        expect: [200]
+        # Individual steps override the run's pacing, including down to none.
+        betweenRequests: 200ms
+
+  - name: search
+    weight: 1
+    steps:
+      - name: search products
+        get: /api/products
+        query:
+          q: widget
+          page: "1"
+        expect: [200]
+      - think: 500ms

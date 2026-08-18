@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # GoReleaser derives the changelog from the commits since the
+          # previous tag, which needs the full history.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.6"
+          check-latest: true
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "26.7.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # The dashboard is embedded at compile time, so it has to exist before
+      # GoReleaser starts any of its cross-platform builds.
+      - name: Build the dashboard
+        run: npm --prefix web ci && npm --prefix web run build
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
