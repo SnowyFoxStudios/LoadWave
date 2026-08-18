@@ -9,6 +9,7 @@ results as they happen.
 
 [![CI](https://github.com/SnowyFoxStudios/LoadWave/actions/workflows/ci.yml/badge.svg)](https://github.com/SnowyFoxStudios/LoadWave/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/SnowyFoxStudios/LoadWave.svg)](https://pkg.go.dev/github.com/SnowyFoxStudios/LoadWave)
+[![Docs](https://img.shields.io/badge/docs-loadwave.snowyfoxgames.com-blue.svg)](https://loadwave.snowyfoxgames.com/)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 </div>
@@ -353,6 +354,12 @@ service was too slow" call for very different responses from a pipeline.
 ---
 
 ## Documentation
+
+The full documentation site is **[loadwave.snowyfoxgames.com](https://loadwave.snowyfoxgames.com/)**
+— getting started, guides for the dashboard, distributed runs, thresholds and
+the Go SDK, and the complete REST API and configuration reference.
+
+The same material also lives in this repository:
 
 | | |
 | ------------------------------------------- | -------------------------------------------- |
