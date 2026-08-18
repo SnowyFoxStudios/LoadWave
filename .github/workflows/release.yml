@@ -32,7 +32,14 @@ jobs:
       # The dashboard is embedded at compile time, so it has to exist before
       # GoReleaser starts any of its cross-platform builds.
       - name: Build the dashboard
-        run: npm --prefix web ci && npm --prefix web run build
+        run: |
+          npm --prefix web ci
+          npm --prefix web run build
+          # Vite empties web/dist before writing to it, which deletes the
+          # tracked .gitkeep placeholder along with everything else. That
+          # leaves the checkout "dirty" as far as git is concerned, and
+          # GoReleaser refuses to release from a dirty tree.
+          git checkout -- web/dist/.gitkeep
 
       - uses: goreleaser/goreleaser-action@v6
         with:

@@ -68,6 +68,11 @@ install: ui ## Install the binary into GOBIN
 .PHONY: ui
 ui: node_modules ## Build the dashboard
 	npm --prefix web run build
+	@# Vite empties web/dist before writing to it, taking the tracked
+	@# .gitkeep placeholder with it. Restored so the tree stays clean —
+	@# CI's release job depends on that, and it saves every other builder
+	@# the same "why is git dirty" surprise.
+	@git checkout -- web/dist/.gitkeep
 
 node_modules: web/package-lock.json
 	npm --prefix web ci
