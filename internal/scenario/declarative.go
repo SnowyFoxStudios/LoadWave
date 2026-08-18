@@ -163,6 +163,14 @@ func (s *StepConfig) validate() error {
 	return nil
 }
 
+// ResolvedRequest returns the method and URL a step's explicit fields or
+// shorthand resolve to, for callers outside this package that need to
+// describe a step — such as the dashboard rendering one back into its
+// builder form.
+func (s StepConfig) ResolvedRequest() (method, url string, err error) {
+	return s.resolve()
+}
+
 // hasShorthand reports whether any method shorthand is set.
 func (s *StepConfig) hasShorthand() bool {
 	for _, sh := range s.shorthands() {

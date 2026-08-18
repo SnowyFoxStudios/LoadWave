@@ -226,6 +226,84 @@ export function newDraft(): Draft {
   };
 }
 
+/**
+ * The shape the server renders a configuration into for the builder — the
+ * same fields as {@link Draft}, minus the `id` every list row carries here.
+ * An id is only ever used as a React key; the server has no reason to invent
+ * one, so this type exists to make that gap explicit at the boundary rather
+ * than reaching for `any`.
+ */
+export interface RawDraft {
+  name: string;
+  baseURL: string;
+  executor: Executor;
+  vus: string;
+  duration: string;
+  stages: { duration: string; target: string }[];
+  gracefulStop: string;
+  maxIterationRate: string;
+  iterations: string;
+  betweenRequests: string;
+  workersPerAgent: string;
+  timeout: string;
+  followRedirects: boolean;
+  insecureSkipTLSVerify: boolean;
+  headers: { key: string; value: string }[];
+  tags: { key: string; value: string }[];
+  thresholds: {
+    metric: string;
+    stat: string;
+    op: string;
+    value: string;
+    abortOnFail: boolean;
+  }[];
+  scenarios: {
+    name: string;
+    weight: string;
+    description: string;
+    steps: {
+      kind: StepKind;
+      name: string;
+      method: HttpMethod;
+      url: string;
+      expect: string;
+      headers: { key: string; value: string }[];
+      query: { key: string; value: string }[];
+      bodyKind: BodyKind;
+      body: string;
+      form: { key: string; value: string }[];
+      capture: { key: string; value: string }[];
+      betweenRequests: string;
+      timeout: string;
+      think: string;
+    }[];
+  }[];
+}
+
+/** Turns a server-rendered configuration into an editable draft, assigning
+ *  fresh ids for the rows to key on. */
+export function draftFromRaw(raw: RawDraft): Draft {
+  return {
+    ...raw,
+    headers: raw.headers.map((pair) => ({ id: newId(), ...pair })),
+    tags: raw.tags.map((pair) => ({ id: newId(), ...pair })),
+    stages: raw.stages.map((stage) => ({ id: newId(), ...stage })),
+    thresholds: raw.thresholds.map((threshold) => ({ id: newId(), ...threshold })),
+    scenarios: raw.scenarios.map((scenario) => ({
+      id: newId(),
+      ...scenario,
+      steps: scenario.steps.map((step) => ({
+        id: newId(),
+        ...step,
+        headers: step.headers.map((pair) => ({ id: newId(), ...pair })),
+        query: step.query.map((pair) => ({ id: newId(), ...pair })),
+        form: step.form.map((pair) => ({ id: newId(), ...pair })),
+        capture: step.capture.map((pair) => ({ id: newId(), ...pair })),
+      })),
+    })),
+  };
+}
+
 /** Collapses key/value rows into a map, dropping incomplete ones. */
 function pairsToMap(pairs: Pair[]): Record<string, string> | undefined {
   const out: Record<string, string> = {};

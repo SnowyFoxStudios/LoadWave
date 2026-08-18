@@ -56,6 +56,16 @@ export function formatBytes(bytes: number | null | undefined): string {
   return `${unit === 0 ? Math.round(value) : value.toFixed(1)} ${BYTE_UNITS[unit]}`;
 }
 
+/** CPU use as a share of one core, the way gopsutil reports a process's own
+ *  usage: 100 means one core fully busy, 250 means two and a half. Read as
+ *  cores rather than a raw percentage, since "0.4 cores" says something a
+ *  reader can compare against the machine's core count; "40%" of what is
+ *  the very question a multi-core host raises. */
+export function formatCores(cpuPercent: number | null | undefined): string {
+  if (cpuPercent === null || cpuPercent === undefined || !Number.isFinite(cpuPercent)) return '—';
+  return `${(cpuPercent / 100).toFixed(2)} cores`;
+}
+
 /** An elapsed duration as mm:ss, or h:mm:ss past an hour. */
 export function formatElapsed(seconds: number | null | undefined): string {
   if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds < 0) {

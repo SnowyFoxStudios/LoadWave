@@ -30,6 +30,7 @@ import (
 	"github.com/SnowyFoxStudios/LoadWave/internal/control"
 	"github.com/SnowyFoxStudios/LoadWave/internal/engine"
 	"github.com/SnowyFoxStudios/LoadWave/internal/metrics"
+	"github.com/SnowyFoxStudios/LoadWave/internal/procstats"
 	"github.com/SnowyFoxStudios/LoadWave/internal/scenario"
 	"github.com/SnowyFoxStudios/LoadWave/pkg/loadwave"
 )
@@ -75,6 +76,10 @@ type Worker struct {
 	// metricsInterval is set by the agent when the worker joins.
 	metricsInterval atomic.Int64
 
+	// stats reports this process's own CPU and memory use, for the
+	// dashboard's per-worker breakdown.
+	stats *procstats.Self
+
 	// base is the worker process's lifetime context, captured when Run
 	// starts. Runs derive from it so that shutting the worker down cancels
 	// whatever it is executing, rather than leaving an orphaned engine
@@ -103,7 +108,7 @@ func New(cfg Config) (*Worker, error) {
 		cfg.Logger = slog.Default()
 	}
 
-	w := &Worker{cfg: cfg, log: cfg.Logger.With("worker", cfg.NodeID)}
+	w := &Worker{cfg: cfg, log: cfg.Logger.With("worker", cfg.NodeID), stats: procstats.NewSelf()}
 	w.metricsInterval.Store(int64(control.DefaultMetricsInterval))
 
 	hostname, _ := os.Hostname()
@@ -137,10 +142,8 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // heartbeat reports this worker's current load.
 func (w *Worker) heartbeat() *loadwavev1.NodeHeartbeat {
-	var memStats runtime.MemStats
-	runtime.ReadMemStats(&memStats)
-
-	beat := &loadwavev1.NodeHeartbeat{MemBytes: memStats.HeapAlloc}
+	cpuPercent, memBytes := w.stats.Usage()
+	beat := &loadwavev1.NodeHeartbeat{CpuPercent: cpuPercent, MemBytes: memBytes}
 	if run := w.currentRun(); run != nil {
 		beat.ActiveVus = uint32(run.engine.ActiveVUs())
 	}

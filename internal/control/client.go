@@ -20,6 +20,8 @@ import (
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -183,7 +185,25 @@ func (c *Client) Run(ctx context.Context) error {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	}, c.cfg.DialOptions...)
 
-	conn, err := grpc.NewClient(c.cfg.Target, opts...)
+	target := c.cfg.Target
+	if socketPath, ok := strings.CutPrefix(target, "unix://"); ok {
+		// gRPC's built-in "unix" resolver parses the target as a URL, which
+		// mishandles a Windows path: with no forward slashes to delimit an
+		// authority, "C:\Users\..." is read whole as one, and the drive
+		// letter's colon then fails net.SplitHostPort ("too many colons in
+		// address") — so a worker can never reach its local agent. Dialing
+		// the path directly sidesteps that parsing altogether; "passthrough"
+		// is used only because grpc.NewClient requires some resolvable
+		// scheme, and the passthrough resolver hands its target to the
+		// dialer unexamined.
+		target = "passthrough:///" + socketPath
+		opts = append(opts, grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "unix", socketPath)
+		}))
+	}
+
+	conn, err := grpc.NewClient(target, opts...)
 	if err != nil {
 		return fmt.Errorf("dial %s: %w", c.cfg.Target, err)
 	}

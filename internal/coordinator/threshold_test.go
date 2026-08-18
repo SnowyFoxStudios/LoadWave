@@ -189,7 +189,7 @@ func TestThresholdOperators(t *testing.T) {
 func TestRunBreachLatches(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("r", "test", &loadwavev1.TestPlan{}, metrics.NewStore(metrics.StoreConfig{}), 1)
+	run := newRun("r", "test", &loadwavev1.TestPlan{}, metrics.NewStore(metrics.StoreConfig{}), 1, "")
 
 	run.setThresholds([]ThresholdResult{{Evaluated: true, Passed: false}})
 	if !run.Breached() {
@@ -207,7 +207,7 @@ func TestRunBreachLatches(t *testing.T) {
 func TestRunPhaseIsTerminalOnce(t *testing.T) {
 	t.Parallel()
 
-	run := newRun("r", "test", &loadwavev1.TestPlan{}, metrics.NewStore(metrics.StoreConfig{}), 1)
+	run := newRun("r", "test", &loadwavev1.TestPlan{}, metrics.NewStore(metrics.StoreConfig{}), 1, "")
 
 	if !run.setPhase(loadwavev1.RunPhase_RUN_PHASE_RUNNING, "") {
 		t.Fatal("running should be accepted")

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -95,15 +96,30 @@ func (ro *runOptions) execute(cmd *cobra.Command, opts *options, path string) er
 	if err := verifyScenarios(cfg, opts); err != nil {
 		return err
 	}
-	return ro.executeConfig(cmd, opts, cfg)
+
+	// Absolute, so the dashboard can save an edit back to the right file
+	// regardless of what the process's working directory happens to be by
+	// the time somebody clicks Start in the browser.
+	sourcePath := ""
+	if path != "" {
+		if abs, err := filepath.Abs(path); err == nil {
+			sourcePath = abs
+		} else {
+			sourcePath = path
+		}
+	}
+	return ro.executeConfig(cmd, opts, cfg, sourcePath)
 }
 
 // executeConfig runs an already-validated configuration.
 //
 // Split out from execute so that `demo` — which builds its configuration in
 // memory rather than reading a file — goes through exactly the same path as a
-// real run, dashboard and reporting included.
-func (ro *runOptions) executeConfig(cmd *cobra.Command, opts *options, cfg *scenario.Config) error {
+// real run, dashboard and reporting included. sourcePath is the file cfg was
+// loaded from, or empty when there isn't one.
+func (ro *runOptions) executeConfig(
+	cmd *cobra.Command, opts *options, cfg *scenario.Config, sourcePath string,
+) error {
 	ctx := cmd.Context()
 
 	// The cluster deliberately does not inherit the signal context. An
@@ -133,7 +149,7 @@ func (ro *runOptions) executeConfig(cmd *cobra.Command, opts *options, cfg *scen
 		fmt.Fprint(cmd.OutOrStdout(), demoBanner(cluster.dashboardURL()))
 	}
 
-	run, err := cluster.coordinator.StartRun(cfg)
+	run, err := cluster.coordinator.StartRun(cfg, sourcePath)
 	if err != nil {
 		return failf("%v", err)
 	}

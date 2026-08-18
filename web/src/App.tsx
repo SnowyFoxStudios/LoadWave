@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 
-import { reportURL, scaleRun, shutdown, stopRun } from './api/client';
+import { fetchRunConfig, reportURL, scaleRun, shutdown, startRun, stopRun } from './api/client';
 import { Metric, isTerminal, type RunPhase, type Tick } from './api/types';
 import { useLiveState } from './hooks/useLiveState';
 import {
@@ -62,8 +62,27 @@ export default function App() {
   const [rangeSeconds, setRangeSeconds] = useState<number>(300);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [poweredOff, setPoweredOff] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
 
   const { run, ticks, totals, agents, endpoints, failures, events, thresholds } = live;
+
+  // Runs the same configuration again, with no detour through the editor —
+  // for the common case of "that looked fine, do it again" or "fixed the
+  // target, rerun it" without re-describing the test from scratch. Fetching
+  // the run's own config rather than caching what was last submitted means
+  // this also replays a test that arrived via `loadwave run file.yaml`,
+  // which the dashboard never held a copy of to begin with.
+  const quickStart = () => {
+    if (!run) return;
+    setRestarting(true);
+    setRestartError(null);
+    fetchRunConfig(run.id)
+      .then((config) => startRun(config.yaml))
+      .then(() => live.refresh())
+      .catch((err: unknown) => setRestartError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setRestarting(false));
+  };
 
   // The endpoint the response-time chart is isolated to, if any.
   const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
@@ -182,7 +201,10 @@ export default function App() {
         active={active}
         themeChoice={choice}
         onThemeChange={setChoice}
-        onStart={() => setDialogOpen(true)}
+        onEditScript={() => setDialogOpen(true)}
+        onQuickStart={quickStart}
+        canQuickStart={run !== undefined}
+        quickStarting={restarting}
         onPowerOff={() => {
           void shutdown().finally(() => setPoweredOff(true));
         }}
@@ -194,6 +216,15 @@ export default function App() {
           className="border-critical/50 text-critical rounded-lg border px-4 py-3 text-sm"
         >
           {live.error}
+        </p>
+      ) : null}
+
+      {restartError ? (
+        <p
+          role="alert"
+          className="border-critical/50 text-critical rounded-lg border px-4 py-3 text-sm"
+        >
+          Could not start: {restartError}
         </p>
       ) : null}
 
@@ -402,7 +433,7 @@ export default function App() {
                 onClick={() => setDialogOpen(true)}
                 disabled={agents.length === 0}
               >
-                Start a run
+                Edit script
               </Button>
             </div>
           </div>
@@ -413,6 +444,7 @@ export default function App() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onStarted={() => live.refresh()}
+        runId={run?.id}
       />
     </div>
   );
@@ -423,14 +455,25 @@ function Header({
   active,
   themeChoice,
   onThemeChange,
-  onStart,
+  onEditScript,
+  onQuickStart,
+  canQuickStart,
+  quickStarting,
   onPowerOff,
 }: {
   live: ReturnType<typeof useLiveState>;
   active: boolean;
   themeChoice: 'light' | 'dark' | 'system';
   onThemeChange: (next: 'light' | 'dark' | 'system') => void;
-  onStart: () => void;
+  /** Opens the scenario editor — the "New run" dialog, kept for building a
+   *  test from scratch or changing one before running it. */
+  onEditScript: () => void;
+  /** Runs the displayed run's own configuration again, with no editor in the
+   *  way — the button most clicks actually want. */
+  onQuickStart: () => void;
+  /** Whether there is a configuration to replay at all. */
+  canQuickStart: boolean;
+  quickStarting: boolean;
   onPowerOff: () => void;
 }) {
   const { run, status, build, agents, canShutDown } = live;
@@ -516,9 +559,23 @@ function Header({
             Stop run
           </Button>
         ) : (
-          <Button variant="primary" onClick={onStart} disabled={agents.length === 0}>
-            Start run
-          </Button>
+          <>
+            <Button variant="ghost" onClick={onEditScript} disabled={agents.length === 0}>
+              Edit script
+            </Button>
+            <Button
+              variant="primary"
+              onClick={onQuickStart}
+              disabled={agents.length === 0 || !canQuickStart || quickStarting}
+              title={
+                canQuickStart
+                  ? 'Run this configuration again, unchanged'
+                  : 'Nothing has run yet — start with Edit script'
+              }
+            >
+              {quickStarting ? 'Starting…' : 'Start'}
+            </Button>
+          </>
         )}
 
         {canShutDown ? (

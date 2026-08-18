@@ -36,6 +36,7 @@ import (
 	"github.com/SnowyFoxStudios/LoadWave/internal/control"
 	"github.com/SnowyFoxStudios/LoadWave/internal/engine"
 	"github.com/SnowyFoxStudios/LoadWave/internal/idspace"
+	"github.com/SnowyFoxStudios/LoadWave/internal/procstats"
 )
 
 // Config describes an agent.
@@ -103,6 +104,12 @@ type workerProc struct {
 	exited  chan struct{}
 }
 
+// workerUsage is a worker's most recently reported resource usage.
+type workerUsage struct {
+	cpuPercent float64
+	memBytes   uint64
+}
+
 // runState is the agent's view of the run it is participating in.
 type runState struct {
 	id      string
@@ -145,6 +152,16 @@ type Agent struct {
 	// under its own lock so heartbeat handling never waits on supervision.
 	vuMu       sync.Mutex
 	vuByWorker map[string]uint32
+
+	// statsByWorker holds each worker's most recently reported CPU and
+	// memory use, for the dashboard's per-worker breakdown. Its own lock,
+	// for the same reason vuByWorker has one.
+	statsMu       sync.Mutex
+	statsByWorker map[string]workerUsage
+
+	// stats reports this agent process's own CPU and memory use — its
+	// supervisory footprint, distinct from the workers it spawns.
+	stats *procstats.Self
 
 	// phaseMu guards the per-worker run phases the agent folds into the
 	// single status it reports upward.
@@ -189,14 +206,16 @@ func New(cfg Config) (*Agent, error) {
 	}
 
 	a := &Agent{
-		cfg:         cfg,
-		log:         cfg.Logger.With("agent", cfg.NodeID),
-		workers:     control.NewSessionRegistry(),
-		socketPath:  cfg.SocketPath,
-		procs:       make(map[string]*workerProc),
-		vuByWorker:  make(map[string]uint32),
-		workerPhase: make(map[string]loadwavev1.RunPhase),
-		workerIters: make(map[string]uint64),
+		cfg:           cfg,
+		log:           cfg.Logger.With("agent", cfg.NodeID),
+		workers:       control.NewSessionRegistry(),
+		socketPath:    cfg.SocketPath,
+		procs:         make(map[string]*workerProc),
+		vuByWorker:    make(map[string]uint32),
+		statsByWorker: make(map[string]workerUsage),
+		stats:         procstats.NewSelf(),
+		workerPhase:   make(map[string]loadwavev1.RunPhase),
+		workerIters:   make(map[string]uint64),
 	}
 
 	hostname, _ := os.Hostname()
@@ -322,11 +341,54 @@ func (a *Agent) shutdown() {
 	}
 }
 
-// heartbeat reports this agent's aggregate load to the coordinator.
+// heartbeat reports this agent's aggregate load to the coordinator, plus a
+// per-worker breakdown of the processes it supervises.
 func (a *Agent) heartbeat() *loadwavev1.NodeHeartbeat {
+	cpuPercent, memBytes := a.stats.Usage()
+
+	// Three short, sequential critical sections rather than one nested one:
+	// mu, vuMu and statsMu are never held together anywhere else, and a
+	// heartbeat firing on a timer is not the place to start doing so.
+	a.mu.Lock()
+	indexByWorker := make(map[string]int, len(a.procs))
+	for id, proc := range a.procs {
+		indexByWorker[id] = proc.index
+	}
+	a.mu.Unlock()
+
+	a.vuMu.Lock()
+	vusByWorker := make(map[string]uint32, len(a.vuByWorker))
+	for id, n := range a.vuByWorker {
+		vusByWorker[id] = n
+	}
+	a.vuMu.Unlock()
+
+	a.statsMu.Lock()
+	usageByWorker := make(map[string]workerUsage, len(a.statsByWorker))
+	for id, usage := range a.statsByWorker {
+		usageByWorker[id] = usage
+	}
+	a.statsMu.Unlock()
+
+	workers := make([]*loadwavev1.WorkerStats, 0, len(indexByWorker))
+	for id, index := range indexByWorker {
+		usage := usageByWorker[id]
+		workers = append(workers, &loadwavev1.WorkerStats{
+			WorkerId:   id,
+			Index:      uint32(index),
+			ActiveVus:  vusByWorker[id],
+			CpuPercent: usage.cpuPercent,
+			MemBytes:   usage.memBytes,
+		})
+	}
+	sort.Slice(workers, func(i, j int) bool { return workers[i].Index < workers[j].Index })
+
 	return &loadwavev1.NodeHeartbeat{
 		ActiveVus:      uint32(a.activeVUs.Load()),
 		HealthyWorkers: uint32(a.workers.Len()),
+		CpuPercent:     cpuPercent,
+		MemBytes:       memBytes,
+		Workers:        workers,
 	}
 }
 
@@ -801,6 +863,10 @@ func (a *Agent) OnLeave(session *control.Session) {
 	delete(a.vuByWorker, session.ID)
 	a.vuMu.Unlock()
 
+	a.statsMu.Lock()
+	delete(a.statsByWorker, session.ID)
+	a.statsMu.Unlock()
+
 	a.phaseMu.Lock()
 	delete(a.workerPhase, session.ID)
 	a.phaseMu.Unlock()
@@ -822,6 +888,13 @@ func (a *Agent) OnHeartbeat(session *control.Session, beat *loadwavev1.NodeHeart
 	a.vuMu.Unlock()
 
 	a.activeVUs.Store(total)
+
+	a.statsMu.Lock()
+	a.statsByWorker[session.ID] = workerUsage{
+		cpuPercent: beat.GetCpuPercent(),
+		memBytes:   beat.GetMemBytes(),
+	}
+	a.statsMu.Unlock()
 }
 
 // OnMetrics implements control.SessionHandler.

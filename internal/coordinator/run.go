@@ -98,6 +98,12 @@ type Run struct {
 	plan       *loadwavev1.TestPlan
 	store      *metrics.Store
 	phase      loadwavev1.RunPhase
+	// sourcePath is the configuration file this run was started from, or
+	// empty when it came from a Go scenario or was submitted to the
+	// dashboard directly. It is what makes editing the run's YAML able to
+	// save back to disk instead of only ever starting a new, disconnected
+	// run.
+	sourcePath string
 	createdAt  time.Time
 	startAt    time.Time
 	startedAt  time.Time
@@ -121,7 +127,9 @@ type Run struct {
 }
 
 // newRun creates a pending run.
-func newRun(id, name string, plan *loadwavev1.TestPlan, store *metrics.Store, peakVUs int) *Run {
+func newRun(
+	id, name string, plan *loadwavev1.TestPlan, store *metrics.Store, peakVUs int, sourcePath string,
+) *Run {
 	return &Run{
 		id:           id,
 		name:         name,
@@ -131,6 +139,7 @@ func newRun(id, name string, plan *loadwavev1.TestPlan, store *metrics.Store, pe
 		createdAt:    time.Now(),
 		peakVUs:      peakVUs,
 		participants: make(map[string]*participant),
+		sourcePath:   sourcePath,
 	}
 }
 
@@ -142,6 +151,10 @@ func (r *Run) Store() *metrics.Store { return r.store }
 
 // Plan returns the plan being executed.
 func (r *Run) Plan() *loadwavev1.TestPlan { return r.plan }
+
+// SourcePath is the configuration file this run was started from, or empty
+// when there isn't one.
+func (r *Run) SourcePath() string { return r.sourcePath }
 
 // Phase returns the current phase.
 func (r *Run) Phase() loadwavev1.RunPhase {
@@ -200,10 +213,14 @@ func (r *Run) addEvent(event Event) {
 }
 
 // Events returns a copy of the run's event log.
+//
+// Never nil, even when empty: this is JSON-encoded straight into the API, and
+// a nil slice there marshals to `null` rather than `[]` — which is exactly
+// the kind of surprise a frontend array method doesn't guard against.
 func (r *Run) Events() []Event {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return append([]Event(nil), r.events...)
+	return append([]Event{}, r.events...)
 }
 
 // setParticipants records the agents taking part.
@@ -277,10 +294,13 @@ func (r *Run) GraceBudget() time.Duration {
 }
 
 // Thresholds returns the latest evaluation.
+//
+// Never nil, even before the first evaluation: this is JSON-encoded straight
+// into the API, and a nil slice there marshals to `null` rather than `[]`.
 func (r *Run) Thresholds() []ThresholdResult {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return append([]ThresholdResult(nil), r.thresholds...)
+	return append([]ThresholdResult{}, r.thresholds...)
 }
 
 // Breached reports whether any threshold has failed at any point.
@@ -340,7 +360,10 @@ func (r *Run) Summary(profile string) Summary {
 		Breached:     r.breached,
 		Tags:         r.plan.GetTags(),
 		Participants: participants,
-		Thresholds:   append([]ThresholdResult(nil), r.thresholds...),
+		// Never nil: a run with no evaluation yet (just started, or with no
+		// thresholds configured) would otherwise send `"thresholds":null`,
+		// and the dashboard calls .length on this without a null guard.
+		Thresholds: append([]ThresholdResult{}, r.thresholds...),
 	}
 
 	switch {

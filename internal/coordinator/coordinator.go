@@ -117,6 +117,28 @@ type AgentInfo struct {
 	HealthyWorkers uint32            `json:"healthyWorkers"`
 	Healthy        bool              `json:"healthy"`
 	VUQuota        int               `json:"vuQuota"`
+
+	// CPUPercent and MemBytes describe the agent process itself — its
+	// supervisory footprint, not the workers it spawns. Zero until its
+	// first heartbeat arrives.
+	CPUPercent float64 `json:"cpuPercent"`
+	MemBytes   uint64  `json:"memBytes"`
+
+	// Workers is the per-process breakdown within this agent. Never nil:
+	// this is JSON-encoded straight to the dashboard, which maps over it
+	// unconditionally.
+	Workers []WorkerInfo `json:"workers"`
+}
+
+// WorkerInfo is one worker process's resource usage, as its agent reported
+// it — the detail an agent-level aggregate would hide, such as one process
+// starved for CPU while its siblings on the same host are not.
+type WorkerInfo struct {
+	ID         string  `json:"id"`
+	Index      uint32  `json:"index"`
+	ActiveVUs  uint32  `json:"activeVUs"`
+	CPUPercent float64 `json:"cpuPercent"`
+	MemBytes   uint64  `json:"memBytes"`
 }
 
 // Coordinator is the control plane.
@@ -214,7 +236,10 @@ func (c *Coordinator) Addr() string {
 // Only one run is permitted at a time. Concurrent runs would have to share the
 // same worker processes and the same network capacity, and the resulting
 // numbers would measure the interference rather than the system under test.
-func (c *Coordinator) StartRun(cfg *scenario.Config) (*Run, error) {
+// sourcePath is the configuration file cfg was loaded from, or empty when
+// there isn't one — a Go-defined scenario, a quick-check built from flags, or
+// a configuration submitted to the dashboard directly.
+func (c *Coordinator) StartRun(cfg *scenario.Config, sourcePath string) (*Run, error) {
 	plan, err := cfg.Plan()
 	if err != nil {
 		return nil, err
@@ -238,7 +263,9 @@ func (c *Coordinator) StartRun(cfg *scenario.Config) (*Run, error) {
 	}
 
 	now := time.Now()
-	run := newRun(NewRunID(now), sanitiseName(cfg.Name), plan, metrics.NewStore(c.cfg.Store), executor.Peak())
+	run := newRun(
+		NewRunID(now), sanitiseName(cfg.Name), plan, metrics.NewStore(c.cfg.Store), executor.Peak(), sourcePath,
+	)
 	run.startAt = now.Add(c.cfg.StartDelay)
 
 	c.runs[run.id] = run
@@ -657,6 +684,7 @@ func (c *Coordinator) OnJoin(_ context.Context, session *control.Session) error 
 		JoinedAt:   session.JoinedAt,
 		LastSeen:   session.LastSeen(),
 		Healthy:    true,
+		Workers:    []WorkerInfo{},
 	}
 
 	c.mu.Lock()
@@ -710,6 +738,21 @@ func (c *Coordinator) OnHeartbeat(session *control.Session, beat *loadwavev1.Nod
 		info.ActiveVUs = beat.GetActiveVus()
 		info.HealthyWorkers = beat.GetHealthyWorkers()
 		info.Healthy = true
+		info.CPUPercent = beat.GetCpuPercent()
+		info.MemBytes = beat.GetMemBytes()
+
+		workers := make([]WorkerInfo, 0, len(beat.GetWorkers()))
+		for _, w := range beat.GetWorkers() {
+			workers = append(workers, WorkerInfo{
+				ID:         w.GetWorkerId(),
+				Index:      w.GetIndex(),
+				ActiveVUs:  w.GetActiveVus(),
+				CPUPercent: w.GetCpuPercent(),
+				MemBytes:   w.GetMemBytes(),
+			})
+		}
+		sort.Slice(workers, func(i, j int) bool { return workers[i].Index < workers[j].Index })
+		info.Workers = workers
 	}
 }
 
@@ -882,10 +925,14 @@ func (c *Coordinator) recordGlobal(event Event) {
 }
 
 // GlobalEvents returns cluster-level events not attached to a run.
+//
+// Never nil, even when empty: this feeds Snapshot.Events, which is
+// JSON-encoded straight into the API, and a nil slice there marshals to
+// `null` rather than `[]`.
 func (c *Coordinator) GlobalEvents() []Event {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return append([]Event(nil), c.events...)
+	return append([]Event{}, c.events...)
 }
 
 // ptr returns a pointer to v, for building optional JSON fields inline.

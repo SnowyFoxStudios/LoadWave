@@ -1,8 +1,14 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import { startRun, validateConfig, type ValidateResult } from '../api/client';
+import {
+  fetchRunConfig,
+  saveRunConfig,
+  startRun,
+  validateConfig,
+  type ValidateResult,
+} from '../api/client';
 import { Builder } from '../builder/Builder';
-import { findProblems, newDraft, toConfig, type Draft } from '../builder/model';
+import { draftFromRaw, findProblems, newDraft, toConfig, type Draft } from '../builder/model';
 import { cn } from '../lib/cn';
 import { toYaml } from '../lib/yaml';
 import { Button } from './ui';
@@ -14,6 +20,19 @@ type Mode = 'build' | 'yaml';
  *  Long enough that typing a URL does not fire a request per character, short
  *  enough that the panel feels like it is keeping up. */
 const VALIDATE_DEBOUNCE_MS = 400;
+
+/** How long to wait after the last edit before saving back to disk. Same
+ *  cadence as validation: this is a "stopped typing" signal, not a "every
+ *  keystroke" one. */
+const SAVE_DEBOUNCE_MS = 800;
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+/** The last filename component of a path, for a status line that does not run
+ *  a whole absolute path together with the rest of the sentence. */
+function basename(path: string): string {
+  return path.split(/[/\\]/).pop() || path;
+}
 
 /**
  * The scenario builder.
@@ -32,10 +51,16 @@ export function StartRunDialog({
   open,
   onClose,
   onStarted,
+  runId,
 }: {
   open: boolean;
   onClose: () => void;
   onStarted: (runId: string) => void;
+  /** The run currently shown on the dashboard, if any. Opening the dialog
+   *  seeds it with that run's actual configuration instead of a blank
+   *  template — the point being to edit and relaunch the test that is
+   *  already there, not to rediscover it from scratch. */
+  runId?: string | undefined;
 }) {
   const [mode, setMode] = useState<Mode>('build');
   const [draft, setDraft] = useState<Draft>(newDraft);
@@ -49,8 +74,106 @@ export function StartRunDialog({
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Set once the dialog has seeded itself from runId, so a file-backed run
+  // can be edited in place with autosave. Null covers everything else: no
+  // current run, one with no source file (a Go scenario, or one submitted to
+  // the dashboard directly), or the fetch failing.
+  const [sourcePath, setSourcePath] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // The content last known to match sourcePath on disk, so the seed fetch
+  // itself is never mistaken for an edit and re-saved right back where it
+  // came from the moment the dialog opens.
+  const savedRef = useRef<string | null>(null);
+
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const labelId = useId();
+
+  // What the dialog is currently seeded for. Compared against on every render
+  // — rather than reset from inside an effect — because this is a "some
+  // prop changed, so throw away derived state" reset, and React's own
+  // guidance is to do that during render: it lands before the stale state
+  // ever paints, instead of committing a stale frame and then correcting it
+  // a tick later.
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const seedKey = open ? (runId ?? '') : null;
+  const [seededFor, setSeededFor] = useState<string | null>(null);
+  if (seedKey !== seededFor) {
+    setSeededFor(seedKey);
+    setSourcePath(null);
+    setSaveState('idle');
+    setSaveError(null);
+    if (seedKey !== null && !runId) {
+      // Opening fresh, with nothing already running: the blank template.
+      setDraft(newDraft());
+      setRaw('');
+      setMode('build');
+    }
+    // seedKey !== null && runId: the effect below fetches the real thing.
+  }
+
+  // Loads the seeded run's actual configuration. Split from the render-time
+  // reset above because a fetch is the one part of this that has to be an
+  // effect — it reaches an external system, not just React state.
+  useEffect(() => {
+    // A ref, not state: it is consulted only by the autosave effect below,
+    // never rendered, so mutating it plainly here needs no re-render of its
+    // own.
+    savedRef.current = null;
+    if (seededFor === null || !runId) return;
+
+    let cancelled = false;
+    fetchRunConfig(runId)
+      .then((config) => {
+        if (cancelled) return;
+        setRaw(config.yaml);
+        setMode('yaml');
+        setSourcePath(config.sourcePath || null);
+        savedRef.current = config.yaml;
+        // So that switching to Build does not fall back to the blank
+        // template: without this, "Edit YAML" would show the real scenario
+        // and "Build" would show an unrelated dummy one, which is confusing
+        // in a way no placeholder text fixes.
+        setDraft(config.draft ? draftFromRaw(config.draft) : newDraft());
+      })
+      .catch(() => {
+        // The run may have aged out of history, or the fetch may simply have
+        // failed; either way, falling back to the blank default beats
+        // leaving the dialog looking like it never finished loading.
+        if (cancelled) return;
+        setDraft(newDraft());
+        setRaw('');
+        setMode('build');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [seededFor, runId]);
+
+  // Autosave: only once seeded from a run that actually has a source file,
+  // and only for content that has changed since the last thing written —
+  // which excludes the seed itself, so opening the dialog never touches the
+  // file before anyone has edited anything.
+  useEffect(() => {
+    if (!open || !runId || !sourcePath) return;
+    if (raw === savedRef.current) return;
+
+    setSaveState('saving');
+    const timer = setTimeout(() => {
+      saveRunConfig(runId, raw)
+        .then(() => {
+          savedRef.current = raw;
+          setSaveState('saved');
+        })
+        .catch((err: unknown) => {
+          setSaveState('error');
+          setSaveError(err instanceof Error ? err.message : String(err));
+        });
+    }, SAVE_DEBOUNCE_MS);
+
+    return () => clearTimeout(timer);
+  }, [open, runId, sourcePath, raw]);
 
   // The form's output. Derived, never stored, so the two cannot drift apart.
   const built = useMemo(() => toYaml(toConfig(draft)), [draft]);
@@ -119,7 +242,23 @@ export function StartRunDialog({
       ref={dialogRef}
       aria-labelledby={labelId}
       onClose={onClose}
-      className="border-line bg-surface text-ink m-auto flex h-[min(90vh,56rem)] w-[min(84rem,95vw)] flex-col rounded-lg border p-0 backdrop:bg-black/50"
+      // The dialog element has no padding of its own — header, body and
+      // footer fill it completely — so a click that lands on the dialog
+      // itself, rather than on one of those children, can only be a click on
+      // the backdrop. Treating that as a close matches every other modal on
+      // the web; without it, clicking outside the editor does nothing and it
+      // reads as stuck open.
+      onClick={(event) => {
+        if (event.target === dialogRef.current) onClose();
+      }}
+      // `hidden` plus `open:flex` rather than a bare `flex`: a <dialog> is
+      // only display:none-by-default via the *user-agent* stylesheet, and
+      // author rules — including an unconditional Tailwind `flex` — always
+      // outrank user-agent ones regardless of specificity. An unconditional
+      // `flex` here would render the dialog the instant it mounts and keep
+      // it visible even after `.close()` clears the `open` attribute, since
+      // its display never depended on that attribute in the first place.
+      className="border-line bg-surface text-ink m-auto hidden h-[min(90vh,56rem)] w-[min(84rem,95vw)] open:flex flex-col rounded-lg border p-0 backdrop:bg-black/50"
     >
       <header className="border-line flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <h2 id={labelId} className="text-sm font-semibold">
@@ -162,8 +301,14 @@ export function StartRunDialog({
           ) : (
             <label className="flex h-full flex-col gap-1.5">
               <span className="text-ink-3 text-xs">
-                The same YAML you would pass to <code className="font-mono">loadwave run</code>.
-                Switching back to Build discards edits made here.
+                {sourcePath ? (
+                  <SaveStatus state={saveState} error={saveError} path={sourcePath} />
+                ) : (
+                  <>
+                    The same YAML you would pass to <code className="font-mono">loadwave run</code>.
+                    Switching back to Build discards edits made here.
+                  </>
+                )}
               </span>
               <textarea
                 value={raw}
@@ -227,6 +372,35 @@ export function StartRunDialog({
       </footer>
     </dialog>
   );
+}
+
+/** Reports whether editing here is actually landing on the file this run
+ *  came from, since autosave has no other visible effect otherwise. */
+function SaveStatus({
+  state,
+  error,
+  path,
+}: {
+  state: SaveState;
+  error: string | null;
+  path: string;
+}) {
+  const name = basename(path);
+
+  if (state === 'error') {
+    return (
+      <span className="text-critical" title={path}>
+        Editing {name} — could not save: {error}
+      </span>
+    );
+  }
+  if (state === 'saving') {
+    return <span title={path}>Editing {name} — saving…</span>;
+  }
+  if (state === 'saved') {
+    return <span title={path}>Editing {name} — saved</span>;
+  }
+  return <span title={path}>Editing {name}. Changes save back to this file as you type.</span>;
 }
 
 /**

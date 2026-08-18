@@ -415,11 +415,17 @@ type NodeHeartbeat struct {
 	Sequence       int64                  `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	ActiveVus      uint32                 `protobuf:"varint,2,opt,name=active_vus,json=activeVus,proto3" json:"active_vus,omitempty"`
 	HealthyWorkers uint32                 `protobuf:"varint,3,opt,name=healthy_workers,json=healthyWorkers,proto3" json:"healthy_workers,omitempty"`
-	CpuPercent     float64                `protobuf:"fixed64,4,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
-	MemBytes       uint64                 `protobuf:"varint,5,opt,name=mem_bytes,json=memBytes,proto3" json:"mem_bytes,omitempty"`
-	SentAt         *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=sent_at,json=sentAt,proto3" json:"sent_at,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// This node's own process: an agent's supervisory footprint, or a
+	// worker's own usage generating load.
+	CpuPercent float64                `protobuf:"fixed64,4,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemBytes   uint64                 `protobuf:"varint,5,opt,name=mem_bytes,json=memBytes,proto3" json:"mem_bytes,omitempty"`
+	SentAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=sent_at,json=sentAt,proto3" json:"sent_at,omitempty"`
+	// Per-worker breakdown, populated only by an agent reporting on the
+	// worker processes it supervises. Empty on a worker's own heartbeat,
+	// which has no children of its own to report.
+	Workers       []*WorkerStats `protobuf:"bytes,7,rep,name=workers,proto3" json:"workers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeHeartbeat) Reset() {
@@ -494,6 +500,93 @@ func (x *NodeHeartbeat) GetSentAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *NodeHeartbeat) GetWorkers() []*WorkerStats {
+	if x != nil {
+		return x.Workers
+	}
+	return nil
+}
+
+// WorkerStats is one worker process's resource usage, as its supervising
+// agent measured it — the detail an aggregate agent-level figure would
+// hide, such as one worker process starved for CPU while its siblings on
+// the same host are not.
+type WorkerStats struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkerId      string                 `protobuf:"bytes,1,opt,name=worker_id,json=workerId,proto3" json:"worker_id,omitempty"`
+	Index         uint32                 `protobuf:"varint,2,opt,name=index,proto3" json:"index,omitempty"`
+	ActiveVus     uint32                 `protobuf:"varint,3,opt,name=active_vus,json=activeVus,proto3" json:"active_vus,omitempty"`
+	CpuPercent    float64                `protobuf:"fixed64,4,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`
+	MemBytes      uint64                 `protobuf:"varint,5,opt,name=mem_bytes,json=memBytes,proto3" json:"mem_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkerStats) Reset() {
+	*x = WorkerStats{}
+	mi := &file_loadwave_v1_control_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkerStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkerStats) ProtoMessage() {}
+
+func (x *WorkerStats) ProtoReflect() protoreflect.Message {
+	mi := &file_loadwave_v1_control_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkerStats.ProtoReflect.Descriptor instead.
+func (*WorkerStats) Descriptor() ([]byte, []int) {
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WorkerStats) GetWorkerId() string {
+	if x != nil {
+		return x.WorkerId
+	}
+	return ""
+}
+
+func (x *WorkerStats) GetIndex() uint32 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetActiveVus() uint32 {
+	if x != nil {
+		return x.ActiveVus
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *WorkerStats) GetMemBytes() uint64 {
+	if x != nil {
+		return x.MemBytes
+	}
+	return 0
+}
+
 // NodeUp is anything a node sends upstream to its supervisor. Agents send it
 // to the coordinator; workers send it to their agent.
 type NodeUp struct {
@@ -513,7 +606,7 @@ type NodeUp struct {
 
 func (x *NodeUp) Reset() {
 	*x = NodeUp{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[4]
+	mi := &file_loadwave_v1_control_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +618,7 @@ func (x *NodeUp) String() string {
 func (*NodeUp) ProtoMessage() {}
 
 func (x *NodeUp) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[4]
+	mi := &file_loadwave_v1_control_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +631,7 @@ func (x *NodeUp) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeUp.ProtoReflect.Descriptor instead.
 func (*NodeUp) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{4}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *NodeUp) GetPayload() isNodeUp_Payload {
@@ -655,7 +748,7 @@ type Accepted struct {
 
 func (x *Accepted) Reset() {
 	*x = Accepted{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[5]
+	mi := &file_loadwave_v1_control_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -667,7 +760,7 @@ func (x *Accepted) String() string {
 func (*Accepted) ProtoMessage() {}
 
 func (x *Accepted) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[5]
+	mi := &file_loadwave_v1_control_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -680,7 +773,7 @@ func (x *Accepted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Accepted.ProtoReflect.Descriptor instead.
 func (*Accepted) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{5}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Accepted) GetAssignedNodeId() string {
@@ -743,7 +836,7 @@ type StartRun struct {
 
 func (x *StartRun) Reset() {
 	*x = StartRun{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[6]
+	mi := &file_loadwave_v1_control_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -755,7 +848,7 @@ func (x *StartRun) String() string {
 func (*StartRun) ProtoMessage() {}
 
 func (x *StartRun) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[6]
+	mi := &file_loadwave_v1_control_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -768,7 +861,7 @@ func (x *StartRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRun.ProtoReflect.Descriptor instead.
 func (*StartRun) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{6}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *StartRun) GetRunId() string {
@@ -863,7 +956,7 @@ type SetQuota struct {
 
 func (x *SetQuota) Reset() {
 	*x = SetQuota{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[7]
+	mi := &file_loadwave_v1_control_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -875,7 +968,7 @@ func (x *SetQuota) String() string {
 func (*SetQuota) ProtoMessage() {}
 
 func (x *SetQuota) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[7]
+	mi := &file_loadwave_v1_control_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -888,7 +981,7 @@ func (x *SetQuota) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetQuota.ProtoReflect.Descriptor instead.
 func (*SetQuota) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{7}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SetQuota) GetRunId() string {
@@ -932,7 +1025,7 @@ type StopRun struct {
 
 func (x *StopRun) Reset() {
 	*x = StopRun{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[8]
+	mi := &file_loadwave_v1_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -944,7 +1037,7 @@ func (x *StopRun) String() string {
 func (*StopRun) ProtoMessage() {}
 
 func (x *StopRun) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[8]
+	mi := &file_loadwave_v1_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -957,7 +1050,7 @@ func (x *StopRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRun.ProtoReflect.Descriptor instead.
 func (*StopRun) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{8}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *StopRun) GetRunId() string {
@@ -991,7 +1084,7 @@ type Ping struct {
 
 func (x *Ping) Reset() {
 	*x = Ping{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[9]
+	mi := &file_loadwave_v1_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1003,7 +1096,7 @@ func (x *Ping) String() string {
 func (*Ping) ProtoMessage() {}
 
 func (x *Ping) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[9]
+	mi := &file_loadwave_v1_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1016,7 +1109,7 @@ func (x *Ping) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ping.ProtoReflect.Descriptor instead.
 func (*Ping) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{9}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Ping) GetNonce() int64 {
@@ -1043,7 +1136,7 @@ type Pong struct {
 
 func (x *Pong) Reset() {
 	*x = Pong{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[10]
+	mi := &file_loadwave_v1_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1055,7 +1148,7 @@ func (x *Pong) String() string {
 func (*Pong) ProtoMessage() {}
 
 func (x *Pong) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[10]
+	mi := &file_loadwave_v1_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1068,7 +1161,7 @@ func (x *Pong) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Pong.ProtoReflect.Descriptor instead.
 func (*Pong) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{10}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Pong) GetNonce() int64 {
@@ -1102,7 +1195,7 @@ type NodeDown struct {
 
 func (x *NodeDown) Reset() {
 	*x = NodeDown{}
-	mi := &file_loadwave_v1_control_proto_msgTypes[11]
+	mi := &file_loadwave_v1_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1114,7 +1207,7 @@ func (x *NodeDown) String() string {
 func (*NodeDown) ProtoMessage() {}
 
 func (x *NodeDown) ProtoReflect() protoreflect.Message {
-	mi := &file_loadwave_v1_control_proto_msgTypes[11]
+	mi := &file_loadwave_v1_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1127,7 +1220,7 @@ func (x *NodeDown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeDown.ProtoReflect.Descriptor instead.
 func (*NodeDown) Descriptor() ([]byte, []int) {
-	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{11}
+	return file_loadwave_v1_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *NodeDown) GetPayload() isNodeDown_Payload {
@@ -1249,7 +1342,7 @@ const file_loadwave_v1_control_proto_rawDesc = "" +
 	"\x06labels\x18\a \x03(\v2\".loadwave.v1.NodeHello.LabelsEntryR\x06labels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe6\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x9a\x02\n" +
 	"\rNodeHeartbeat\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x03R\bsequence\x12\x1d\n" +
 	"\n" +
@@ -1258,7 +1351,16 @@ const file_loadwave_v1_control_proto_rawDesc = "" +
 	"\vcpu_percent\x18\x04 \x01(\x01R\n" +
 	"cpuPercent\x12\x1b\n" +
 	"\tmem_bytes\x18\x05 \x01(\x04R\bmemBytes\x123\n" +
-	"\asent_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x06sentAt\"\xc8\x02\n" +
+	"\asent_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x06sentAt\x122\n" +
+	"\aworkers\x18\a \x03(\v2\x18.loadwave.v1.WorkerStatsR\aworkers\"\x9d\x01\n" +
+	"\vWorkerStats\x12\x1b\n" +
+	"\tworker_id\x18\x01 \x01(\tR\bworkerId\x12\x14\n" +
+	"\x05index\x18\x02 \x01(\rR\x05index\x12\x1d\n" +
+	"\n" +
+	"active_vus\x18\x03 \x01(\rR\tactiveVus\x12\x1f\n" +
+	"\vcpu_percent\x18\x04 \x01(\x01R\n" +
+	"cpuPercent\x12\x1b\n" +
+	"\tmem_bytes\x18\x05 \x01(\x04R\bmemBytes\"\xc8\x02\n" +
 	"\x06NodeUp\x12.\n" +
 	"\x05hello\x18\x01 \x01(\v2\x16.loadwave.v1.NodeHelloH\x00R\x05hello\x12:\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x1a.loadwave.v1.NodeHeartbeatH\x00R\theartbeat\x124\n" +
@@ -1341,7 +1443,7 @@ func file_loadwave_v1_control_proto_rawDescGZIP() []byte {
 }
 
 var file_loadwave_v1_control_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_loadwave_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_loadwave_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_loadwave_v1_control_proto_goTypes = []any{
 	(RunPhase)(0),                 // 0: loadwave.v1.RunPhase
 	(LogLevel)(0),                 // 1: loadwave.v1.LogLevel
@@ -1349,53 +1451,55 @@ var file_loadwave_v1_control_proto_goTypes = []any{
 	(*RunStatusUpdate)(nil),       // 3: loadwave.v1.RunStatusUpdate
 	(*NodeHello)(nil),             // 4: loadwave.v1.NodeHello
 	(*NodeHeartbeat)(nil),         // 5: loadwave.v1.NodeHeartbeat
-	(*NodeUp)(nil),                // 6: loadwave.v1.NodeUp
-	(*Accepted)(nil),              // 7: loadwave.v1.Accepted
-	(*StartRun)(nil),              // 8: loadwave.v1.StartRun
-	(*SetQuota)(nil),              // 9: loadwave.v1.SetQuota
-	(*StopRun)(nil),               // 10: loadwave.v1.StopRun
-	(*Ping)(nil),                  // 11: loadwave.v1.Ping
-	(*Pong)(nil),                  // 12: loadwave.v1.Pong
-	(*NodeDown)(nil),              // 13: loadwave.v1.NodeDown
-	nil,                           // 14: loadwave.v1.LogEvent.FieldsEntry
-	nil,                           // 15: loadwave.v1.NodeHello.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
-	(*MetricBatch)(nil),           // 17: loadwave.v1.MetricBatch
-	(*durationpb.Duration)(nil),   // 18: google.protobuf.Duration
-	(*TestPlan)(nil),              // 19: loadwave.v1.TestPlan
+	(*WorkerStats)(nil),           // 6: loadwave.v1.WorkerStats
+	(*NodeUp)(nil),                // 7: loadwave.v1.NodeUp
+	(*Accepted)(nil),              // 8: loadwave.v1.Accepted
+	(*StartRun)(nil),              // 9: loadwave.v1.StartRun
+	(*SetQuota)(nil),              // 10: loadwave.v1.SetQuota
+	(*StopRun)(nil),               // 11: loadwave.v1.StopRun
+	(*Ping)(nil),                  // 12: loadwave.v1.Ping
+	(*Pong)(nil),                  // 13: loadwave.v1.Pong
+	(*NodeDown)(nil),              // 14: loadwave.v1.NodeDown
+	nil,                           // 15: loadwave.v1.LogEvent.FieldsEntry
+	nil,                           // 16: loadwave.v1.NodeHello.LabelsEntry
+	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
+	(*MetricBatch)(nil),           // 18: loadwave.v1.MetricBatch
+	(*durationpb.Duration)(nil),   // 19: google.protobuf.Duration
+	(*TestPlan)(nil),              // 20: loadwave.v1.TestPlan
 }
 var file_loadwave_v1_control_proto_depIdxs = []int32{
-	16, // 0: loadwave.v1.LogEvent.time:type_name -> google.protobuf.Timestamp
+	17, // 0: loadwave.v1.LogEvent.time:type_name -> google.protobuf.Timestamp
 	1,  // 1: loadwave.v1.LogEvent.level:type_name -> loadwave.v1.LogLevel
-	14, // 2: loadwave.v1.LogEvent.fields:type_name -> loadwave.v1.LogEvent.FieldsEntry
+	15, // 2: loadwave.v1.LogEvent.fields:type_name -> loadwave.v1.LogEvent.FieldsEntry
 	0,  // 3: loadwave.v1.RunStatusUpdate.phase:type_name -> loadwave.v1.RunPhase
-	15, // 4: loadwave.v1.NodeHello.labels:type_name -> loadwave.v1.NodeHello.LabelsEntry
-	16, // 5: loadwave.v1.NodeHeartbeat.sent_at:type_name -> google.protobuf.Timestamp
-	4,  // 6: loadwave.v1.NodeUp.hello:type_name -> loadwave.v1.NodeHello
-	5,  // 7: loadwave.v1.NodeUp.heartbeat:type_name -> loadwave.v1.NodeHeartbeat
-	17, // 8: loadwave.v1.NodeUp.metrics:type_name -> loadwave.v1.MetricBatch
-	3,  // 9: loadwave.v1.NodeUp.run_status:type_name -> loadwave.v1.RunStatusUpdate
-	2,  // 10: loadwave.v1.NodeUp.log:type_name -> loadwave.v1.LogEvent
-	12, // 11: loadwave.v1.NodeUp.pong:type_name -> loadwave.v1.Pong
-	18, // 12: loadwave.v1.Accepted.heartbeat_interval:type_name -> google.protobuf.Duration
-	18, // 13: loadwave.v1.Accepted.metrics_interval:type_name -> google.protobuf.Duration
-	19, // 14: loadwave.v1.StartRun.plan:type_name -> loadwave.v1.TestPlan
-	16, // 15: loadwave.v1.StartRun.start_at:type_name -> google.protobuf.Timestamp
-	18, // 16: loadwave.v1.SetQuota.ramp:type_name -> google.protobuf.Duration
-	16, // 17: loadwave.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
-	16, // 18: loadwave.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
-	7,  // 19: loadwave.v1.NodeDown.accepted:type_name -> loadwave.v1.Accepted
-	8,  // 20: loadwave.v1.NodeDown.start_run:type_name -> loadwave.v1.StartRun
-	9,  // 21: loadwave.v1.NodeDown.set_quota:type_name -> loadwave.v1.SetQuota
-	10, // 22: loadwave.v1.NodeDown.stop_run:type_name -> loadwave.v1.StopRun
-	11, // 23: loadwave.v1.NodeDown.ping:type_name -> loadwave.v1.Ping
-	6,  // 24: loadwave.v1.ControlService.Join:input_type -> loadwave.v1.NodeUp
-	13, // 25: loadwave.v1.ControlService.Join:output_type -> loadwave.v1.NodeDown
-	25, // [25:26] is the sub-list for method output_type
-	24, // [24:25] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	16, // 4: loadwave.v1.NodeHello.labels:type_name -> loadwave.v1.NodeHello.LabelsEntry
+	17, // 5: loadwave.v1.NodeHeartbeat.sent_at:type_name -> google.protobuf.Timestamp
+	6,  // 6: loadwave.v1.NodeHeartbeat.workers:type_name -> loadwave.v1.WorkerStats
+	4,  // 7: loadwave.v1.NodeUp.hello:type_name -> loadwave.v1.NodeHello
+	5,  // 8: loadwave.v1.NodeUp.heartbeat:type_name -> loadwave.v1.NodeHeartbeat
+	18, // 9: loadwave.v1.NodeUp.metrics:type_name -> loadwave.v1.MetricBatch
+	3,  // 10: loadwave.v1.NodeUp.run_status:type_name -> loadwave.v1.RunStatusUpdate
+	2,  // 11: loadwave.v1.NodeUp.log:type_name -> loadwave.v1.LogEvent
+	13, // 12: loadwave.v1.NodeUp.pong:type_name -> loadwave.v1.Pong
+	19, // 13: loadwave.v1.Accepted.heartbeat_interval:type_name -> google.protobuf.Duration
+	19, // 14: loadwave.v1.Accepted.metrics_interval:type_name -> google.protobuf.Duration
+	20, // 15: loadwave.v1.StartRun.plan:type_name -> loadwave.v1.TestPlan
+	17, // 16: loadwave.v1.StartRun.start_at:type_name -> google.protobuf.Timestamp
+	19, // 17: loadwave.v1.SetQuota.ramp:type_name -> google.protobuf.Duration
+	17, // 18: loadwave.v1.Ping.sent_at:type_name -> google.protobuf.Timestamp
+	17, // 19: loadwave.v1.Pong.sent_at:type_name -> google.protobuf.Timestamp
+	8,  // 20: loadwave.v1.NodeDown.accepted:type_name -> loadwave.v1.Accepted
+	9,  // 21: loadwave.v1.NodeDown.start_run:type_name -> loadwave.v1.StartRun
+	10, // 22: loadwave.v1.NodeDown.set_quota:type_name -> loadwave.v1.SetQuota
+	11, // 23: loadwave.v1.NodeDown.stop_run:type_name -> loadwave.v1.StopRun
+	12, // 24: loadwave.v1.NodeDown.ping:type_name -> loadwave.v1.Ping
+	7,  // 25: loadwave.v1.ControlService.Join:input_type -> loadwave.v1.NodeUp
+	14, // 26: loadwave.v1.ControlService.Join:output_type -> loadwave.v1.NodeDown
+	26, // [26:27] is the sub-list for method output_type
+	25, // [25:26] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_loadwave_v1_control_proto_init() }
@@ -1405,7 +1509,7 @@ func file_loadwave_v1_control_proto_init() {
 	}
 	file_loadwave_v1_metrics_proto_init()
 	file_loadwave_v1_plan_proto_init()
-	file_loadwave_v1_control_proto_msgTypes[4].OneofWrappers = []any{
+	file_loadwave_v1_control_proto_msgTypes[5].OneofWrappers = []any{
 		(*NodeUp_Hello)(nil),
 		(*NodeUp_Heartbeat)(nil),
 		(*NodeUp_Metrics)(nil),
@@ -1413,7 +1517,7 @@ func file_loadwave_v1_control_proto_init() {
 		(*NodeUp_Log)(nil),
 		(*NodeUp_Pong)(nil),
 	}
-	file_loadwave_v1_control_proto_msgTypes[11].OneofWrappers = []any{
+	file_loadwave_v1_control_proto_msgTypes[12].OneofWrappers = []any{
 		(*NodeDown_Accepted)(nil),
 		(*NodeDown_StartRun)(nil),
 		(*NodeDown_SetQuota)(nil),
@@ -1426,7 +1530,7 @@ func file_loadwave_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_loadwave_v1_control_proto_rawDesc), len(file_loadwave_v1_control_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

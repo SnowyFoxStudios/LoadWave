@@ -8,7 +8,14 @@ import type {
   StoreStats,
   ThresholdResult,
 } from '../api/types';
-import { formatAgo, formatBytes, formatCount, formatMillis, formatPercent } from '../lib/format';
+import {
+  formatAgo,
+  formatBytes,
+  formatCores,
+  formatCount,
+  formatMillis,
+  formatPercent,
+} from '../lib/format';
 import { cn } from '../lib/cn';
 import { Badge, Empty, Panel } from './ui';
 
@@ -169,7 +176,7 @@ export function EndpointTable({
       title="Requests"
       action={
         <span className="text-ink-3 text-xs">
-          {onSelect ? 'click a row to chart it alone' : 'by name'}
+          {onSelect ? 'click a request name to chart it alone' : 'by name'}
         </span>
       }
     >
@@ -195,18 +202,15 @@ export function EndpointTable({
             {sorted.map((row) => (
               <tr
                 key={row.name}
-                onClick={onSelect ? () => onSelect(row.name) : undefined}
                 aria-selected={selected === row.name}
-                className={cn(
-                  onSelect && 'cursor-pointer',
-                  selected === row.name ? 'bg-accent-soft' : 'hover:bg-surface-2',
-                )}
+                className={cn(selected === row.name ? 'bg-accent-soft' : 'hover:bg-surface-2')}
               >
                 <th scope="row" className="max-w-[22rem] truncate px-3 py-2 text-left font-normal">
                   {onSelect ? (
                     <button
                       type="button"
-                      className="text-ink hover:text-accent font-mono text-xs"
+                      onClick={() => onSelect(row.name)}
+                      className="text-ink hover:text-accent cursor-pointer font-mono text-xs"
                       title={
                         selected === row.name
                           ? 'Show every endpoint on the chart again'
@@ -405,6 +409,26 @@ export function Agents({ agents }: { agents: AgentInfo[] }) {
                     className="bg-surface-2 text-ink-3 rounded px-1.5 py-0.5 font-mono text-[11px]"
                   >
                     {key}={value}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {agent.workers.length > 0 ? (
+              <ul className="border-line mt-2 flex flex-col gap-1 border-t pt-2">
+                {agent.workers.map((worker) => (
+                  <li
+                    key={worker.id}
+                    className="flex items-center justify-between gap-3 text-xs"
+                  >
+                    <span className="text-ink-3 min-w-0 truncate font-mono">{worker.id}</span>
+                    <span className="tnum text-ink-2 flex shrink-0 items-center gap-3">
+                      <span title="Virtual users">{formatCount(worker.activeVUs)} VUs</span>
+                      <span title="CPU, as a share of one core">
+                        {formatCores(worker.cpuPercent)}
+                      </span>
+                      <span title="Resident memory">{formatBytes(worker.memBytes)}</span>
+                    </span>
                   </li>
                 ))}
               </ul>

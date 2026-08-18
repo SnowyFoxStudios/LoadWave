@@ -198,7 +198,7 @@ scenarios:
         expect: [200]
 `, server.URL))
 
-	run, err := cluster.coordinator.StartRun(cfg)
+	run, err := cluster.coordinator.StartRun(cfg, "")
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
@@ -298,7 +298,7 @@ scenarios:
         expect: [200]
 `, server.URL))
 
-	run, err := cluster.coordinator.StartRun(cfg)
+	run, err := cluster.coordinator.StartRun(cfg, "")
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
@@ -353,7 +353,7 @@ scenarios:
         expect: [200]
 `, server.URL))
 
-	run, err := cluster.coordinator.StartRun(cfg)
+	run, err := cluster.coordinator.StartRun(cfg, "")
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
 	}
@@ -391,7 +391,7 @@ scenarios:
       - get: /
 `)
 
-	if _, err := coord.StartRun(cfg); err == nil {
+	if _, err := coord.StartRun(cfg, ""); err == nil {
 		t.Fatal("a run was started with no agents connected")
 	}
 }

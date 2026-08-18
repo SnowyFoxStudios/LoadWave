@@ -100,6 +100,20 @@ export interface AgentInfo {
   healthyWorkers: number;
   healthy: boolean;
   vuQuota: number;
+  /** This agent process's own footprint — supervision, not the load its
+   *  workers generate. */
+  cpuPercent: number;
+  memBytes: number;
+  workers: WorkerInfo[];
+}
+
+/** One worker process's resource usage, as its agent reported it. */
+export interface WorkerInfo {
+  id: string;
+  index: number;
+  activeVUs: number;
+  cpuPercent: number;
+  memBytes: number;
 }
 
 /** One endpoint's slice of a time bucket.

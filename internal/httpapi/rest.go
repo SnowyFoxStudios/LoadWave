@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -44,6 +45,83 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, snapshot)
+}
+
+// handleGetRunConfig returns the exact YAML a run was started from, plus the
+// file it came from, if any.
+//
+// This is what lets the "New run" dialog reopen showing the test that is
+// actually active — or that just finished — instead of a blank template: the
+// coordinator already keeps the plan's original YAML for workers to
+// reconstruct their engine from, so no re-serialisation is needed here.
+func (s *Server) handleGetRunConfig(w http.ResponseWriter, r *http.Request) {
+	run, ok := s.coord.Lookup(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "no run %q", r.PathValue("id"))
+		return
+	}
+
+	body := map[string]any{
+		// A plain string, not the []byte straight off the proto: encoding/json
+		// base64-encodes a []byte by default, which is exactly wrong for text
+		// a browser is about to show in a textarea.
+		"yaml":       string(run.Plan().GetConfigYaml()),
+		"sourcePath": run.SourcePath(),
+	}
+
+	// The Build form as well as the YAML, so switching to it does not fall
+	// back to the blank template. Best-effort: a plan with no embedded
+	// configuration (assembled purely from CLI flags, with no file and no
+	// scenario at all) yields nothing to convert, and the dialog keeps its
+	// blank draft rather than showing an error over something this minor.
+	if cfg, err := scenario.FromPlan(run.Plan()); err == nil {
+		body["draft"] = draftFromConfig(cfg)
+	}
+
+	writeJSON(w, http.StatusOK, body)
+}
+
+// handleSaveRunConfig writes an edited configuration back to the file a run
+// was started from.
+//
+// Restricted to runs that have one: a configuration built from a Go scenario,
+// from CLI flags with no file, or submitted to the dashboard directly has
+// nowhere on disk that "save" could mean.
+func (s *Server) handleSaveRunConfig(w http.ResponseWriter, r *http.Request) {
+	if s.guardReadOnly(w) {
+		return
+	}
+
+	run, ok := s.coord.Lookup(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "no run %q", r.PathValue("id"))
+		return
+	}
+	path := run.SourcePath()
+	if path == "" {
+		writeError(w, http.StatusConflict, "this run has no source file to save to")
+		return
+	}
+
+	body, err := readBody(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+
+	// Parsed, not just stored: writing YAML the parser would reject leaves a
+	// file on disk that the next `loadwave run` cannot read, which is a worse
+	// outcome than declining the save and saying why.
+	if _, err := scenario.Parse(body); err != nil {
+		writeError(w, http.StatusBadRequest, "%s", err.Error())
+		return
+	}
+
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "write %s: %s", path, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"savedTo": path})
 }
 
 // handleRunSeries returns a run's cumulative per-series aggregates, which is
@@ -119,7 +197,10 @@ func (s *Server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := s.coord.StartRun(cfg)
+	// A configuration posted to the dashboard is never file-backed, even if
+	// it started life as a file: only the browser's in-memory text exists at
+	// this point, so there is nothing on disk to save further edits back to.
+	run, err := s.coord.StartRun(cfg, "")
 	if err != nil {
 		// A rejected start is the operator's problem to fix — no agents, or a
 		// run already going — rather than a server fault.

@@ -63,7 +63,7 @@ The demo server is a toy. Its numbers say nothing about your hardware.`,
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"Demo target listening on %s — a toy server, not a benchmark.\n\n", target)
 
-			return ro.executeConfig(cmd, opts, cfg)
+			return ro.executeConfig(cmd, opts, cfg, "")
 		},
 	}
 

@@ -1,3 +1,4 @@
+import type { RawDraft } from '../builder/model';
 import type { Frame, Snapshot } from './types';
 
 /** Base path for every REST call. Relative, because the coordinator serves
@@ -102,6 +103,36 @@ export function validateConfig(config: string): Promise<ValidateResult> {
 export function startRun(config: string): Promise<{ runId: string }> {
   return request<{ runId: string }>('/runs', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/yaml' },
+    body: config,
+  });
+}
+
+/** A run's configuration, as it was actually started. */
+export interface RunConfig {
+  yaml: string;
+  /** The file this run was started from, or empty when there isn't one —
+   *  a Go scenario, CLI flags with no file, or a config posted directly. */
+  sourcePath: string;
+  /** The same configuration, rendered for the Build form. Absent for the
+   *  rare plan with nothing to render — assembled from flags alone, with no
+   *  file and no scenario at all. */
+  draft?: RawDraft;
+}
+
+/** Fetches the exact configuration a run was started from. */
+export function fetchRunConfig(runId: string): Promise<RunConfig> {
+  return request<RunConfig>(`/runs/${encodeURIComponent(runId)}/config`);
+}
+
+/** Saves edited YAML back to the file a run was started from.
+ *
+ *  Only valid for a run whose RunConfig.sourcePath is non-empty; the
+ *  coordinator rejects anything else with 409.
+ */
+export function saveRunConfig(runId: string, config: string): Promise<{ savedTo: string }> {
+  return request<{ savedTo: string }>(`/runs/${encodeURIComponent(runId)}/config`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/yaml' },
     body: config,
   });

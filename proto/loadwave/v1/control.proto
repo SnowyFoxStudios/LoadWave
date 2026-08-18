@@ -75,9 +75,28 @@ message NodeHeartbeat {
   int64 sequence = 1;
   uint32 active_vus = 2;
   uint32 healthy_workers = 3;
+  // This node's own process: an agent's supervisory footprint, or a
+  // worker's own usage generating load.
   double cpu_percent = 4;
   uint64 mem_bytes = 5;
   google.protobuf.Timestamp sent_at = 6;
+
+  // Per-worker breakdown, populated only by an agent reporting on the
+  // worker processes it supervises. Empty on a worker's own heartbeat,
+  // which has no children of its own to report.
+  repeated WorkerStats workers = 7;
+}
+
+// WorkerStats is one worker process's resource usage, as its supervising
+// agent measured it — the detail an aggregate agent-level figure would
+// hide, such as one worker process starved for CPU while its siblings on
+// the same host are not.
+message WorkerStats {
+  string worker_id = 1;
+  uint32 index = 2;
+  uint32 active_vus = 3;
+  double cpu_percent = 4;
+  uint64 mem_bytes = 5;
 }
 
 // NodeUp is anything a node sends upstream to its supervisor. Agents send it

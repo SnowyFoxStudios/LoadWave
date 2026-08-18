@@ -132,6 +132,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/runs", s.handleStartRun)
 	mux.HandleFunc("POST /api/v1/validate", s.handleValidate)
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.handleGetRun)
+	mux.HandleFunc("GET /api/v1/runs/{id}/config", s.handleGetRunConfig)
+	mux.HandleFunc("PUT /api/v1/runs/{id}/config", s.handleSaveRunConfig)
 	mux.HandleFunc("POST /api/v1/runs/{id}/stop", s.handleStopRun)
 	mux.HandleFunc("POST /api/v1/runs/{id}/scale", s.handleScaleRun)
 	mux.HandleFunc("GET /api/v1/runs/{id}/series", s.handleRunSeries)
