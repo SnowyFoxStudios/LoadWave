@@ -167,7 +167,7 @@ func (s *StepConfig) validate() error {
 // shorthand resolve to, for callers outside this package that need to
 // describe a step — such as the dashboard rendering one back into its
 // builder form.
-func (s StepConfig) ResolvedRequest() (method, url string, err error) {
+func (s StepConfig) ResolvedRequest() (method, target string, err error) {
 	return s.resolve()
 }
 

@@ -417,10 +417,7 @@ export function Agents({ agents }: { agents: AgentInfo[] }) {
             {agent.workers.length > 0 ? (
               <ul className="border-line mt-2 flex flex-col gap-1 border-t pt-2">
                 {agent.workers.map((worker) => (
-                  <li
-                    key={worker.id}
-                    className="flex items-center justify-between gap-3 text-xs"
-                  >
+                  <li key={worker.id} className="flex items-center justify-between gap-3 text-xs">
                     <span className="text-ink-3 min-w-0 truncate font-mono">{worker.id}</span>
                     <span className="tnum text-ink-2 flex shrink-0 items-center gap-3">
                       <span title="Virtual users">{formatCount(worker.activeVUs)} VUs</span>

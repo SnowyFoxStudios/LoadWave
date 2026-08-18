@@ -258,7 +258,7 @@ export function StartRunDialog({
       // `flex` here would render the dialog the instant it mounts and keep
       // it visible even after `.close()` clears the `open` attribute, since
       // its display never depended on that attribute in the first place.
-      className="border-line bg-surface text-ink m-auto hidden h-[min(90vh,56rem)] w-[min(84rem,95vw)] open:flex flex-col rounded-lg border p-0 backdrop:bg-black/50"
+      className="border-line bg-surface text-ink m-auto hidden h-[min(90vh,56rem)] w-[min(84rem,95vw)] flex-col rounded-lg border p-0 backdrop:bg-black/50 open:flex"
     >
       <header className="border-line flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <h2 id={labelId} className="text-sm font-semibold">

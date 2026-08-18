@@ -93,11 +93,11 @@ type participant struct {
 type Run struct {
 	mu sync.RWMutex
 
-	id         string
-	name       string
-	plan       *loadwavev1.TestPlan
-	store      *metrics.Store
-	phase      loadwavev1.RunPhase
+	id    string
+	name  string
+	plan  *loadwavev1.TestPlan
+	store *metrics.Store
+	phase loadwavev1.RunPhase
 	// sourcePath is the configuration file this run was started from, or
 	// empty when it came from a Go scenario or was submitted to the
 	// dashboard directly. It is what makes editing the run's YAML able to

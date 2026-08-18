@@ -97,8 +97,8 @@ func (s *Server) handleSaveRunConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no run %q", r.PathValue("id"))
 		return
 	}
-	path := run.SourcePath()
-	if path == "" {
+	sourcePath := run.SourcePath()
+	if sourcePath == "" {
 		writeError(w, http.StatusConflict, "this run has no source file to save to")
 		return
 	}
@@ -117,11 +117,11 @@ func (s *Server) handleSaveRunConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.WriteFile(path, body, 0o644); err != nil {
-		writeError(w, http.StatusInternalServerError, "write %s: %s", path, err.Error())
+	if err := os.WriteFile(sourcePath, body, 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "write %s: %s", sourcePath, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"savedTo": path})
+	writeJSON(w, http.StatusOK, map[string]any{"savedTo": sourcePath})
 }
 
 // handleRunSeries returns a run's cumulative per-series aggregates, which is

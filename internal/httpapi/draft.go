@@ -166,13 +166,13 @@ func draftScenarioFrom(s scenario.ScenarioConfig) draftScenario {
 		// then, for the same reason as draftFromConfig's slices.
 		Steps: []draftStep{},
 	}
-	for _, step := range s.Steps {
-		out.Steps = append(out.Steps, draftStepFrom(step))
+	for i := range s.Steps {
+		out.Steps = append(out.Steps, draftStepFrom(&s.Steps[i]))
 	}
 	return out
 }
 
-func draftStepFrom(s scenario.StepConfig) draftStep {
+func draftStepFrom(s *scenario.StepConfig) draftStep {
 	// Headers, query, form and capture are never nil on either branch below:
 	// the dashboard's own conversion back into its form state maps over all
 	// four unconditionally, on every step regardless of kind, and a nil Go
