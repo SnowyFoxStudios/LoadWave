@@ -51,14 +51,33 @@ loadwave run test.yaml --ui       # ...and watch it in a browser
 
 ## Install
 
+Grab a binary from [Releases](https://github.com/SnowyFoxStudios/LoadWave/releases).
+Every archive is one self-contained executable with the dashboard already inside it.
+
 ```sh
 go install github.com/SnowyFoxStudios/LoadWave/cmd/loadwave@latest
 ```
 
-Or grab a binary from [Releases](https://github.com/SnowyFoxStudios/LoadWave/releases).
-Every archive is one self-contained executable with the dashboard inside it.
+<details>
+<summary>Note on <code>go install</code></summary>
 
-Building from source needs **Go 1.26+** and **Node 26+**:
+This gives you the CLI and the REST API, but **not the dashboard**. The
+dashboard is a separate frontend build (`web/`) that is not checked into the
+repository, and `go install` only ever compiles Go source — there is no step
+in it that runs the frontend build. A binary installed this way answers
+`loadwave <command> --help` and everything under `/api/v1/` normally; `--ui`
+prints:
+
+```
+LoadWave: the dashboard has not been built into this binary.
+```
+
+For the dashboard, use a release binary above, or build from source below.
+
+</details>
+
+Building from source needs **Go 1.26+** and **Node 26+**, and does include the
+dashboard:
 
 ```sh
 git clone https://github.com/SnowyFoxStudios/LoadWave.git
