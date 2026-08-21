@@ -95,3 +95,47 @@ export function Button({ variant = 'secondary', className, ...rest }: ButtonProp
 export function Empty({ children }: { children: ReactNode }) {
   return <p className="text-ink-3 px-4 py-6 text-center text-sm">{children}</p>;
 }
+
+/**
+ * A row of mutually exclusive choices.
+ *
+ * Buttons rather than a select: the sets here are short, and showing every
+ * option at once means a reader comparing two views can see what else is on
+ * offer without opening anything.
+ */
+export function Segmented<T extends string | number>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  /** Names the group for assistive technology. Not drawn. */
+  label: string;
+  options: readonly { value: T; label: string; title?: string }[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      className="border-line inline-flex overflow-hidden rounded-md border"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          aria-pressed={value === option.value}
+          title={option.title}
+          className={cn(
+            'px-2.5 py-1 text-xs font-medium',
+            value === option.value ? 'bg-accent-soft text-accent' : 'text-ink-2 hover:bg-surface-2',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}

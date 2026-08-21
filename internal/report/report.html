@@ -233,6 +233,122 @@
         list-style: none;
         font-size: 0.78rem;
       }
+
+      /*
+       * Interactivity, in CSS alone.
+       *
+       * The radio buttons choose which view of a chart is shown, and the
+       * legend's checkboxes dim every line but the ones picked. Both are plain
+       * form controls and sibling selectors: this file still has no script,
+       * and still opens offline in ten years.
+       *
+       * The controls themselves are off-screen rather than display:none, so
+       * they keep their place in the tab order and stay operable from the
+       * keyboard.
+       */
+      .vsel,
+      .pick {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        white-space: nowrap;
+      }
+      .card {
+        position: relative;
+      }
+      .seg {
+        display: inline-flex;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      .seg label {
+        padding: 0.1rem 0.45rem;
+        color: var(--ink-2);
+        font-size: 0.72rem;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .seg label + label {
+        border-left: 1px solid var(--line);
+      }
+      .viewhint {
+        margin: 0 0 0.2rem;
+      }
+      /* The view's own name is redundant beside a working switcher, and is
+         revealed below only where the switcher cannot work. */
+      .viewname {
+        display: none;
+      }
+      .legend label {
+        display: inline-flex;
+        gap: 0.35rem;
+        align-items: baseline;
+        cursor: pointer;
+      }
+      .vsel:focus-visible + label,
+      .pick:focus-visible + label {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      @supports selector(:has(*)) {
+        /* One view at a time, chosen by its radio. */
+        .card:has(.vsel) .views > .view {
+          display: none;
+        }
+        .card:has(.v1:checked) .w1,
+        .card:has(.v2:checked) .w2,
+        .card:has(.v3:checked) .w3,
+        .card:has(.v4:checked) .w4 {
+          display: block;
+        }
+        .card:has(.v1:checked) .seg label:nth-child(1),
+        .card:has(.v2:checked) .seg label:nth-child(2),
+        .card:has(.v3:checked) .seg label:nth-child(3),
+        .card:has(.v4:checked) .seg label:nth-child(4) {
+          background: var(--surface-2);
+          color: var(--accent);
+        }
+
+        /* Highlighting: dim everything, then restore what was picked. One
+           rule per palette slot, which is why the SVG tags its lines s1–s8. */
+        .view:has(.pick:checked) .line,
+        .view:has(.pick:checked) .area,
+        .view:has(.pick:checked) .legend label {
+          opacity: 0.22;
+        }
+        .view:has(.p1:checked) .s1,
+        .view:has(.p2:checked) .s2,
+        .view:has(.p3:checked) .s3,
+        .view:has(.p4:checked) .s4,
+        .view:has(.p5:checked) .s5,
+        .view:has(.p6:checked) .s6,
+        .view:has(.p7:checked) .s7,
+        .view:has(.p8:checked) .s8 {
+          opacity: 1;
+        }
+        /* Written the long way round to outweigh the dimming rule above,
+           which is more specific than a bare `.pick:checked + label`. */
+        .view:has(.pick:checked) .legend .pick:checked + label {
+          opacity: 1;
+        }
+      }
+
+      /* Without :has, the switcher cannot work — so every view is shown at
+         once, each under its own name, and nothing is lost but the switching. */
+      @supports not selector(:has(*)) {
+        .seg {
+          display: none;
+        }
+        .viewname {
+          display: inline;
+        }
+      }
       .legend li {
         display: flex;
         gap: 0.35rem;
@@ -413,28 +529,67 @@
         {{ end }}
       </div>
 
-      {{ if .Charts }}
+      {{ if .Cards }}
         <h2>Over time</h2>
         <div class="charts">
-          {{ range .Charts }}
-            <figure>
-              <figcaption>
-                <b>{{ .Title }}</b>
-                <span class="sub">{{ .Hint }}</span>
-              </figcaption>
-              {{ .SVG }}
-              <ul class="legend">
-                {{ range .Legend }}
-                  <li>
-                    <span class="swatch" style="background: {{ .Color }}"></span>
-                    <span class="sub">{{ .Label }}</span>
-                    <span class="val">{{ .Value }}</span>
-                  </li>
+          {{ range $card := .Cards }}
+            <figure class="card">
+              {{ if $card.Multi }}
+                {{ range $i, $view := $card.Views }}
+                  <input
+                    type="radio"
+                    class="vsel v{{ slot $i }}"
+                    name="view-{{ $card.Index }}"
+                    id="view-{{ $card.Index }}-{{ $view.Name }}"
+                    {{ if eq $i $card.Default }}checked{{ end }}
+                  />
                 {{ end }}
-              </ul>
+              {{ end }}
+              <figcaption>
+                <b>{{ $card.Title }}</b>
+                {{ if $card.Multi }}
+                  <span class="seg" role="radiogroup" aria-label="{{ $card.Title }} view">
+                    {{ range $view := $card.Views }}
+                      <label for="view-{{ $card.Index }}-{{ $view.Name }}">{{ $view.Name }}</label>
+                    {{ end }}
+                  </span>
+                {{ end }}
+              </figcaption>
+              <div class="views">
+                {{ range $i, $view := $card.Views }}
+                  <div class="view w{{ slot $i }}">
+                    <p class="sub viewhint">
+                      {{ if $view.Name }}<b class="viewname">{{ $view.Name }}:</b>{{ end }}
+                      {{ $view.Hint }}
+                    </p>
+                    {{ $view.SVG }}
+                    <ul class="legend">
+                      {{ range $j, $entry := $view.Legend }}
+                        <li>
+                          <input
+                            type="checkbox"
+                            class="pick p{{ slot $j }}"
+                            id="pick-{{ $card.Index }}-{{ slot $i }}-{{ slot $j }}"
+                          />
+                          <label for="pick-{{ $card.Index }}-{{ slot $i }}-{{ slot $j }}">
+                            <span class="swatch" style="background: {{ $entry.Color }}"></span>
+                            <span class="sub">{{ $entry.Label }}</span>
+                            <span class="val">{{ $entry.Value }}</span>
+                          </label>
+                        </li>
+                      {{ end }}
+                    </ul>
+                  </div>
+                {{ end }}
+              </div>
             </figure>
           {{ end }}
         </div>
+        <p class="sub">
+          Pick a view above a chart to change how it aggregates, and click a name in a legend to
+          highlight that line — the others dim rather than disappear. Both are plain HTML and CSS;
+          this file still runs no script.
+        </p>
         {{ if .OmittedEnds }}
           <p class="sub">
             The response-time chart shows the busiest endpoints. {{ .OmittedEnds }} further

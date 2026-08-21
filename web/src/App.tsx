@@ -11,22 +11,60 @@ import {
   formatPercent,
   formatRate,
 } from './lib/format';
+import {
+  scenariosByEndpoint,
+  stepLines,
+  sumScenarioAverages,
+  withinPalette,
+  type LatencyView,
+} from './lib/latency';
 import { useChartColors, useTheme } from './lib/theme';
 import { useMotionPreference, type MotionChoice } from './lib/motion';
 import { Agents, EndpointTable, EventLog, Failures, Thresholds } from './components/Panels';
 import { StartRunDialog } from './components/StartRunDialog';
 import { StatTile } from './components/StatTile';
 import { TimeChart, type ChartSeries } from './components/TimeChart';
-import { Badge, Button, Panel, type Tone } from './components/ui';
-import { cn } from './lib/cn';
+import { Badge, Button, Panel, Segmented, type Tone } from './components/ui';
 
 /** Time windows offered above the charts. */
-const RANGES = [
-  { label: '1m', seconds: 60 },
-  { label: '5m', seconds: 300 },
-  { label: '15m', seconds: 900 },
-  { label: 'All', seconds: 0 },
-] as const;
+const RANGES: readonly { value: number; label: string }[] = [
+  { value: 60, label: '1m' },
+  { value: 300, label: '5m' },
+  { value: 900, label: '15m' },
+  { value: 0, label: 'All' },
+];
+
+/**
+ * How the response-time chart rolls its averages up.
+ *
+ * Four heights over the same measurements. Total, Individual and Step are
+ * means — how slow a request is, at whole-run, per-request and per-step-of-a-
+ * scenario granularity. Scenario is a sum: a pass waits for each of its steps
+ * in turn, so a scenario line is its own step lines added together, which is
+ * the number to compare against a page budget and not one a mean can give.
+ */
+const LATENCY_VIEWS: readonly { value: LatencyView; label: string; title: string }[] = [
+  { value: 'total', label: 'Total', title: 'The mean of every request' },
+  { value: 'individual', label: 'Individual', title: 'One line per request, its own mean' },
+  {
+    value: 'step',
+    label: 'Step',
+    title: 'One line per step, grouped under the scenario that runs it',
+  },
+  {
+    value: 'scenario',
+    label: 'Scenario',
+    title: "One line per scenario: its own steps' averages summed",
+  },
+];
+
+/** One line of context per view, shown beside the chart's title. */
+const LATENCY_HINTS: Record<LatencyView, string> = {
+  total: 'mean across every request',
+  individual: 'average per endpoint — click names to highlight them',
+  step: 'average per step, grouped by scenario',
+  scenario: "each scenario's own step averages summed",
+};
 
 /** How many endpoints get their own line before the rest are left off.
  *
@@ -36,12 +74,24 @@ const RANGES = [
  */
 const MAX_CHARTED_ENDPOINTS = 8;
 
+/** Steps and scenarios charted at once, bounded by the same eight palette
+ *  slots, for the same reason. */
+const MAX_CHARTED_STEPS = MAX_CHARTED_ENDPOINTS;
+const MAX_CHARTED_SCENARIOS = MAX_CHARTED_ENDPOINTS;
+
 /** Extra history kept beyond the selected window, so the continuously
  *  scrolling chart never runs past the end of its data. */
 const WINDOW_SLACK_MS = 10_000;
 
 /** Status classes in severity order, which is also the stacking order. */
 const STATUS_ORDER = ['2xx', '3xx', '4xx', '5xx', 'error', '1xx', 'other'] as const;
+
+/** Adds or removes one member, returning a new set for React to notice. */
+function toggled(current: ReadonlySet<string>, name: string): ReadonlySet<string> {
+  const next = new Set(current);
+  if (!next.delete(name)) next.add(name);
+  return next;
+}
 
 const PHASE_TONE: Record<RunPhase, Tone> = {
   pending: 'neutral',
@@ -65,7 +115,7 @@ export default function App() {
   const [restarting, setRestarting] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
 
-  const { run, ticks, totals, agents, endpoints, failures, events, thresholds } = live;
+  const { run, ticks, totals, agents, endpoints, failures, series, events, thresholds } = live;
 
   // Runs the same configuration again, with no detour through the editor —
   // for the common case of "that looked fine, do it again" or "fixed the
@@ -84,10 +134,41 @@ export default function App() {
       .finally(() => setRestarting(false));
   };
 
-  // The endpoint the response-time chart is isolated to, if any.
-  const [selectedEndpoint, setSelectedEndpoint] = useState<string | null>(null);
-  const toggleEndpoint = (name: string) =>
-    setSelectedEndpoint((current) => (current === name ? null : name));
+  // How far up the hierarchy the response-time chart aggregates.
+  const [latencyView, setLatencyView] = useState<LatencyView>('individual');
+
+  // What the response-time chart is highlighting.
+  //
+  // A highlight rather than an isolation: the other lines stay on the chart,
+  // dimmed. A request is only slow relative to its neighbours, and hiding them
+  // takes away the comparison that makes the highlighted one worth looking at.
+  // Several can be picked at once, which is what makes two of them comparable.
+  const [highlightedRequests, setHighlightedRequests] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [highlightedScenarios, setHighlightedScenarios] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const highlightCount =
+    latencyView === 'scenario' ? highlightedScenarios.size : highlightedRequests.size;
+
+  const clearHighlight = () => {
+    setHighlightedRequests(new Set());
+    setHighlightedScenarios(new Set());
+  };
+
+  // Highlighting a request says nothing on a chart that does not draw one line
+  // per request, so a click from the table below brings the view back to one
+  // that does. Step already qualifies, and is left alone.
+  const toggleRequest = (name: string) => {
+    setLatencyView((view) => (view === 'step' ? view : 'individual'));
+    setHighlightedRequests((current) => toggled(current, name));
+  };
+
+  const toggleScenario = (name: string) => {
+    setHighlightedScenarios((current) => toggled(current, name));
+  };
 
   const windowed = useMemo<Tick[]>(() => {
     if (rangeSeconds === 0 || ticks.length === 0) return ticks;
@@ -128,8 +209,9 @@ export default function App() {
   // rather than given a repeated colour. They stay one click away in the
   // table below.
   const chartedEndpoints = useMemo(
-    () => endpointNames.slice(0, MAX_CHARTED_ENDPOINTS),
-    [endpointNames],
+    () =>
+      withinPalette(endpointNames, MAX_CHARTED_ENDPOINTS, (name) => highlightedRequests.has(name)),
+    [endpointNames, highlightedRequests],
   );
 
   // Colour follows the endpoint, not its rank on the chart.
@@ -145,15 +227,62 @@ export default function App() {
     return map;
   }, [chartedEndpoints, colors]);
 
-  // An endpoint picked from the table might not be one of the charted eight.
-  const visibleEndpoints = useMemo(
-    () => (selectedEndpoint ? [selectedEndpoint] : chartedEndpoints),
-    [selectedEndpoint, chartedEndpoints],
+  const latencySeries = useMemo(
+    () => chartedEndpoints.map((name) => windowed.map((t) => t.endpoints?.[name]?.avg ?? 0)),
+    [windowed, chartedEndpoints],
   );
 
-  const latencySeries = useMemo(
-    () => visibleEndpoints.map((name) => windowed.map((t) => t.endpoints?.[name]?.avg ?? 0)),
-    [windowed, visibleEndpoints],
+  // Which scenarios issue which request. Derived from the whole-run series
+  // rather than from the ticks, which carry no scenario for an endpoint; see
+  // scenariosByEndpoint.
+  const endpointOwners = useMemo(() => scenariosByEndpoint(series), [series]);
+
+  // Scenarios seen in the window, busiest first — the same ordering rule as
+  // the endpoints, so the two views agree on what is prominent.
+  const scenarioNames = useMemo(() => {
+    const requests = new Map<string, number>();
+    for (const tick of windowed) {
+      for (const [name, point] of Object.entries(tick.scenarios ?? {})) {
+        requests.set(name, (requests.get(name) ?? 0) + point.requests);
+      }
+    }
+    return [...requests.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name]) => name);
+  }, [windowed]);
+
+  const chartedScenarios = useMemo(
+    () =>
+      withinPalette(scenarioNames, MAX_CHARTED_SCENARIOS, (name) => highlightedScenarios.has(name)),
+    [scenarioNames, highlightedScenarios],
+  );
+
+  const totalLatencySeries = useMemo(() => [windowed.map((t) => t.avg)], [windowed]);
+
+  // One line per step of a scenario. Same measurements as the per-request
+  // view, said with the scenario each step belongs to — which is the level
+  // the scenario sums below are built from.
+  const allSteps = useMemo(
+    () => stepLines(endpointNames, endpointOwners),
+    [endpointNames, endpointOwners],
+  );
+
+  const chartedSteps = useMemo(
+    () => withinPalette(allSteps, MAX_CHARTED_STEPS, (step) => highlightedRequests.has(step.name)),
+    [allSteps, highlightedRequests],
+  );
+
+  const stepLatencySeries = useMemo(
+    () => chartedSteps.map((step) => windowed.map((t) => t.endpoints?.[step.name]?.avg ?? 0)),
+    [windowed, chartedSteps],
+  );
+
+  const scenarioLatencySeries = useMemo(
+    () =>
+      chartedScenarios.map((scenario) =>
+        windowed.map((t) => sumScenarioAverages(t.endpoints, scenario, endpointOwners)),
+      ),
+    [windowed, chartedScenarios, endpointOwners],
   );
 
   // Only the status classes actually seen are charted, so a clean run does not
@@ -173,12 +302,135 @@ export default function App() {
 
   const latencySpecs = useMemo<ChartSeries[]>(
     () =>
-      visibleEndpoints.map((name) => ({
+      chartedEndpoints.map((name) => ({
         label: name,
         color: endpointColor.get(name) ?? colors.categorical[0] ?? colors.textMuted,
+        muted: highlightedRequests.size > 0 && !highlightedRequests.has(name),
       })),
-    [visibleEndpoints, endpointColor, colors],
+    [chartedEndpoints, endpointColor, colors, highlightedRequests],
   );
+
+  // Colour follows the step's identity, not its rank, for the same reason it
+  // follows the endpoint's.
+  const stepSpecs = useMemo<ChartSeries[]>(() => {
+    const byKey = [...chartedSteps].map((step) => step.key).sort((a, b) => a.localeCompare(b));
+    return chartedSteps.map((step) => ({
+      label: step.label,
+      color: colors.categorical[byKey.indexOf(step.key)] ?? colors.textMuted,
+      muted: highlightedRequests.size > 0 && !highlightedRequests.has(step.name),
+    }));
+  }, [chartedSteps, colors, highlightedRequests]);
+
+  // Colour follows the scenario by name, for the same reason it follows the
+  // endpoint: a hue a reader has learned should not move when the traffic
+  // ranking does.
+  const scenarioSpecs = useMemo<ChartSeries[]>(() => {
+    const byName = [...chartedScenarios].sort((a, b) => a.localeCompare(b));
+    return chartedScenarios.map((name) => ({
+      label: name,
+      color: colors.categorical[byName.indexOf(name)] ?? colors.textMuted,
+      muted: highlightedScenarios.size > 0 && !highlightedScenarios.has(name),
+    }));
+  }, [chartedScenarios, colors, highlightedScenarios]);
+
+  // The one-line Total view shares the hue the latency tiles use, so switching
+  // views reads as one chart changing altitude rather than as four unrelated
+  // charts.
+  const totalLatencySpec = useMemo<ChartSeries[]>(
+    () => [{ label: 'average', color: colors.latency[2], fillOpacity: 0.14 }],
+    [colors],
+  );
+
+  // A step's legend entry reads "scenario · step"; the highlight is keyed on
+  // the request underneath, which is what the table below names too.
+  const toggleStep = (label: string) => {
+    const step = chartedSteps.find((entry) => entry.label === label);
+    if (step) toggleRequest(step.name);
+  };
+
+  const responseSelected = useMemo<string[]>(() => {
+    if (latencyView === 'individual') return [...highlightedRequests];
+    if (latencyView === 'step') {
+      return chartedSteps.filter((step) => highlightedRequests.has(step.name)).map((s) => s.label);
+    }
+    if (latencyView === 'scenario') return [...highlightedScenarios];
+    return [];
+  }, [latencyView, highlightedRequests, highlightedScenarios, chartedSteps]);
+
+  const responseValues =
+    latencyView === 'total'
+      ? totalLatencySeries
+      : latencyView === 'step'
+        ? stepLatencySeries
+        : latencyView === 'scenario'
+          ? scenarioLatencySeries
+          : latencySeries;
+
+  // What the reader needs told about the view they are on: which lines were
+  // left off, and how to undo a highlight they no longer want.
+  const latencyFootnote = useMemo<string | undefined>(() => {
+    const notes: string[] = [];
+
+    if (latencyView === 'individual' || latencyView === 'step') {
+      const shown = latencyView === 'individual' ? chartedEndpoints.length : chartedSteps.length;
+      const total = latencyView === 'individual' ? endpointNames.length : allSteps.length;
+      const noun = latencyView === 'individual' ? 'endpoints' : 'steps';
+
+      if (total > shown) {
+        notes.push(
+          `Showing the ${shown} busiest of ${total} ${noun}. Highlighting one from the ` +
+            'table below always gives it a line.',
+        );
+      }
+      if (
+        latencyView === 'step' &&
+        chartedSteps.some((step) => (endpointOwners.get(step.name)?.length ?? 0) > 1)
+      ) {
+        notes.push(
+          'A step more than one scenario runs is charted under each of them; ' +
+            'those lines carry the same measurements.',
+        );
+      }
+    }
+
+    if (latencyView === 'scenario') {
+      if (scenarioNames.length > chartedScenarios.length) {
+        notes.push(
+          `Showing the ${chartedScenarios.length} busiest of ${scenarioNames.length} scenarios.`,
+        );
+      } else if (chartedScenarios.length === 0) {
+        notes.push('No scenario has reported a request in this window.');
+      }
+    }
+
+    if (highlightCount > 0) {
+      notes.push(
+        `Highlighting ${highlightCount}; the rest are dimmed, not hidden. ` +
+          'Click a highlighted name again to drop it.',
+      );
+    }
+
+    return notes.length > 0 ? notes.join(' ') : undefined;
+  }, [
+    latencyView,
+    endpointNames,
+    chartedEndpoints,
+    endpointOwners,
+    allSteps,
+    chartedSteps,
+    scenarioNames,
+    chartedScenarios,
+    highlightCount,
+  ]);
+
+  const responseSpecs =
+    latencyView === 'total'
+      ? totalLatencySpec
+      : latencyView === 'step'
+        ? stepSpecs
+        : latencyView === 'scenario'
+          ? scenarioSpecs
+          : latencySpecs;
 
   const statusSpecs = useMemo<ChartSeries[]>(
     () => statusKeys.map((key) => ({ label: key, color: colors.status[key] ?? colors.textMuted })),
@@ -284,24 +536,12 @@ export default function App() {
 
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-ink-3 text-xs font-medium">Window</span>
-            <div className="border-line inline-flex overflow-hidden rounded-md border">
-              {RANGES.map((range) => (
-                <button
-                  key={range.label}
-                  type="button"
-                  onClick={() => setRangeSeconds(range.seconds)}
-                  aria-pressed={rangeSeconds === range.seconds}
-                  className={cn(
-                    'px-2.5 py-1 text-xs font-medium',
-                    rangeSeconds === range.seconds
-                      ? 'bg-accent-soft text-accent'
-                      : 'text-ink-2 hover:bg-surface-2',
-                  )}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              label="Time window"
+              options={RANGES}
+              value={rangeSeconds}
+              onChange={setRangeSeconds}
+            />
             <span className="tnum text-ink-3 text-xs">
               {windowed.length} of {ticks.length} points · {live.resolutionSeconds}s resolution
             </span>
@@ -356,30 +596,46 @@ export default function App() {
             />
             <TimeChart
               title="Response time"
-              hint={
-                selectedEndpoint
-                  ? `average for ${selectedEndpoint}`
-                  : 'average per endpoint — click one to isolate it'
+              hint={LATENCY_HINTS[latencyView]}
+              controls={
+                <div className="flex items-center gap-2">
+                  {highlightCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={clearHighlight}
+                      className="text-ink-3 hover:text-ink text-xs underline underline-offset-2"
+                    >
+                      Clear highlight
+                    </button>
+                  ) : null}
+                  <Segmented
+                    label="Response time view"
+                    options={LATENCY_VIEWS}
+                    value={latencyView}
+                    onChange={setLatencyView}
+                  />
+                </div>
               }
               timestamps={timestamps}
-              values={latencySeries}
-              series={latencySpecs}
+              values={responseValues}
+              series={responseSpecs}
               format={(v) => formatMillis(v)}
               colors={colors}
               syncKey="loadwave"
               live={active && motion.smooth}
               spanMs={rangeSeconds * 1000}
-              onSelectSeries={toggleEndpoint}
-              selected={selectedEndpoint}
-              emptyMessage="No requests recorded yet."
-              footnote={
-                selectedEndpoint
-                  ? 'Showing one endpoint. Click it again, or another row below, to show them all.'
-                  : endpointNames.length > MAX_CHARTED_ENDPOINTS
-                    ? `Showing the ${MAX_CHARTED_ENDPOINTS} busiest of ${endpointNames.length} endpoints. ` +
-                      'Click any row below to chart one of the others.'
-                    : undefined
+              onSelectSeries={
+                latencyView === 'individual'
+                  ? toggleRequest
+                  : latencyView === 'step'
+                    ? toggleStep
+                    : latencyView === 'scenario'
+                      ? toggleScenario
+                      : undefined
               }
+              selected={responseSelected}
+              emptyMessage="No requests recorded yet."
+              footnote={latencyFootnote}
             />
             <TimeChart
               title="Responses by status"
@@ -404,8 +660,8 @@ export default function App() {
 
           <EndpointTable
             endpoints={endpoints}
-            selected={selectedEndpoint}
-            onSelect={toggleEndpoint}
+            selected={highlightedRequests}
+            onSelect={toggleRequest}
           />
 
           <Failures failures={failures} stats={run.stats} />
