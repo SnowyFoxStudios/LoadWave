@@ -51,7 +51,10 @@ type Series struct {
 // Everything is inline — no script, no external stylesheet, no web font — so
 // the report stays readable years later, offline, attached to a ticket.
 type Chart struct {
-	Title  string
+	Title string
+	// Name labels this view of the measurements where a card offers several.
+	// Empty for a card with only one.
+	Name   string
 	Hint   string
 	X      []time.Time
 	Series []Series
@@ -141,7 +144,9 @@ func (c Chart) SVG() template.HTML {
 	}
 
 	for _, i := range order {
-		c.writeSeries(&b, plotted[i], upper)
+		// The class carries the series' slot so the stylesheet can dim every
+		// line but the one a reader picked, with no script involved.
+		c.writeSeries(&b, plotted[i], upper, i)
 	}
 
 	b.WriteString(`</svg>`)
@@ -200,7 +205,7 @@ func (c Chart) writeXLabels(b *strings.Builder, xs []time.Time) {
 }
 
 // writeSeries draws one line, and its area if it has one.
-func (c Chart) writeSeries(b *strings.Builder, s Series, upper float64) {
+func (c Chart) writeSeries(b *strings.Builder, s Series, upper float64, slot int) {
 	if len(s.Points) == 0 {
 		return
 	}
@@ -219,8 +224,8 @@ func (c Chart) writeSeries(b *strings.Builder, s Series, upper float64) {
 	if s.Fill || c.Stacked {
 		// Close the path down to the baseline to make it an area.
 		fmt.Fprintf(b,
-			`<polygon fill="%s" fill-opacity="%s" points="%.1f,%d %s %.1f,%d"/>`,
-			s.Color, fillOpacity(c.Stacked),
+			`<polygon class="area s%d" fill="%s" fill-opacity="%s" points="%.1f,%d %s %.1f,%d"/>`,
+			slot+1, s.Color, fillOpacity(c.Stacked),
 			float64(marginLeft), marginTop+plotHeight,
 			line,
 			float64(marginLeft+plotWidth), marginTop+plotHeight)
@@ -234,7 +239,8 @@ func (c Chart) writeSeries(b *strings.Builder, s Series, upper float64) {
 		stroke = "var(--surface)"
 		class = "band-edge"
 	}
-	fmt.Fprintf(b, `<polyline class="%s" fill="none" stroke="%s" points="%s"/>`, class, stroke, line)
+	fmt.Fprintf(b, `<polyline class="%s s%d" fill="none" stroke="%s" points="%s"/>`,
+		class, slot+1, stroke, line)
 }
 
 // fillOpacity is solid for a stacked band and translucent under a line.

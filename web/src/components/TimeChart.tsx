@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 import uPlot from 'uplot';
 
 import type { ChartColors } from '../lib/theme';
+import { cn } from '../lib/cn';
 import { formatTime } from '../lib/format';
 import { advanceEdge, approach } from '../lib/motion';
 
@@ -10,12 +11,21 @@ export interface ChartSeries {
   color: string;
   /** 0–1. Non-stacked series draw a translucent area below the line. */
   fillOpacity?: number;
+  /**
+   * Drawn faint, for a series outside the current highlight.
+   *
+   * Kept rather than dropped: a highlighted line means little without the
+   * others still there to compare it against.
+   */
+  muted?: boolean;
 }
 
 export interface TimeChartProps {
   title: string;
   /** One line of context under the title. Not a legend. */
   hint?: string;
+  /** Controls for the chart itself, rendered in its header. */
+  controls?: ReactNode;
   /** Bucket start times, epoch milliseconds. */
   timestamps: number[];
   /** One array per series, in display order, aligned to `timestamps`. */
@@ -31,9 +41,9 @@ export interface TimeChartProps {
   colors: ChartColors;
   emptyMessage?: string;
   /** Makes the legend clickable. Called with the series label. */
-  onSelectSeries?: (label: string) => void;
-  /** The currently isolated series, if any. */
-  selected?: string | null;
+  onSelectSeries?: ((label: string) => void) | undefined;
+  /** Labels of the currently highlighted series. */
+  selected?: readonly string[];
   /** Shown under the legend, e.g. when series were left off the chart. */
   footnote?: string | undefined;
   /**
@@ -179,6 +189,7 @@ function tooltipPlugin(
 export function TimeChart({
   title,
   hint,
+  controls,
   timestamps,
   values,
   series,
@@ -189,7 +200,7 @@ export function TimeChart({
   colors,
   emptyMessage = 'Waiting for data…',
   onSelectSeries,
-  selected,
+  selected = [],
   footnote,
   live = false,
   spanMs,
@@ -229,7 +240,7 @@ export function TimeChart({
   const signature = useMemo(
     () =>
       JSON.stringify([
-        series.map((s) => [s.label, s.color, s.fillOpacity]),
+        series.map((s) => [s.label, s.color, s.fillOpacity, s.muted]),
         stacked,
         colors.surface,
         colors.grid,
@@ -285,18 +296,28 @@ export function TimeChart({
       series: [
         {},
         ...drawOrder.map<uPlot.Series>((spec) => {
-          const fill = stacked
-            ? spec.color
-            : spec.fillOpacity
-              ? withAlpha(spec.color, spec.fillOpacity)
-              : null;
+          // A muted line keeps its hue at low alpha rather than turning grey,
+          // so it still reads as the same series once the highlight is
+          // dropped — and stays distinguishable from its muted neighbours.
+          const fill =
+            stacked || spec.muted
+              ? stacked
+                ? spec.color
+                : null
+              : spec.fillOpacity
+                ? withAlpha(spec.color, spec.fillOpacity)
+                : null;
 
           return {
             label: spec.label,
             // A 2px surface-coloured edge is what separates adjacent stacked
             // bands; without it two similar fills merge into one shape.
-            stroke: stacked ? colors.surface : spec.color,
-            width: 2,
+            stroke: stacked
+              ? colors.surface
+              : spec.muted
+                ? withAlpha(spec.color, 0.25)
+                : spec.color,
+            width: spec.muted ? 1 : 2,
             points: { show: false },
             ...(fill === null ? {} : { fill }),
           };
@@ -411,9 +432,12 @@ export function TimeChart({
 
   return (
     <figure className="border-line bg-surface flex flex-col rounded-lg border">
-      <figcaption className="flex items-baseline justify-between gap-3 px-4 pt-3 pb-1">
+      <figcaption className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-4 pt-3 pb-1">
         <h3 className="text-ink text-sm font-semibold">{title}</h3>
-        {hint ? <p className="text-ink-3 text-xs">{hint}</p> : null}
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5">
+          {hint ? <p className="text-ink-3 text-xs">{hint}</p> : null}
+          {controls}
+        </div>
       </figcaption>
 
       {hasData ? (
@@ -449,22 +473,31 @@ export function TimeChart({
 
             if (!onSelectSeries) {
               return (
-                <li key={spec.label} className="flex items-center gap-1.5 text-xs">
+                <li
+                  key={spec.label}
+                  className={cn('flex items-center gap-1.5 text-xs', spec.muted && 'opacity-45')}
+                >
                   {content}
                 </li>
               );
             }
 
+            const highlighted = selected.includes(spec.label);
             return (
               <li key={spec.label}>
                 <button
                   type="button"
                   onClick={() => onSelectSeries(spec.label)}
-                  aria-pressed={selected === spec.label}
+                  aria-pressed={highlighted}
                   title={
-                    selected === spec.label ? 'Show every series again' : `Show only ${spec.label}`
+                    highlighted
+                      ? `Stop highlighting ${spec.label}`
+                      : `Highlight ${spec.label}, dimming the rest`
                   }
-                  className="hover:bg-surface-2 flex items-center gap-1.5 rounded px-1 py-0.5 text-xs"
+                  className={cn(
+                    'hover:bg-surface-2 flex items-center gap-1.5 rounded px-1 py-0.5 text-xs',
+                    spec.muted && 'opacity-45',
+                  )}
                 >
                   {content}
                 </button>

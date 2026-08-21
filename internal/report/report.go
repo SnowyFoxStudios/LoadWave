@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ type Data struct {
 	Verdict     Verdict
 	Totals      map[string]metrics.SeriesSummary
 	Headline    []Stat
-	Charts      []Chart
+	Cards       []Card
 	Endpoints   []metrics.EndpointSummary
 	Failures    []metrics.FailureSummary
 	Thresholds  []coordinator.ThresholdResult
@@ -93,6 +94,25 @@ type Stat struct {
 	Detail string
 }
 
+// Card is one figure in the report: a chart, or several views of the same
+// measurements between which the reader can switch.
+//
+// Switching is done in CSS, by a radio input per view — the report carries no
+// script and is not about to start. The views are all rendered into the file,
+// so a browser too old for the selector still shows every one of them, and a
+// printed copy shows whichever was on screen.
+type Card struct {
+	// Index makes this card's input names unique within the document.
+	Index int
+	Title string
+	Views []Chart
+	// Default is the view shown until the reader picks another.
+	Default int
+}
+
+// Multi reports whether this card offers a choice of view.
+func (c Card) Multi() bool { return len(c.Views) > 1 }
+
 // Build assembles a report from a coordinator snapshot.
 func Build(snapshot coordinator.Snapshot, now time.Time) (Data, error) {
 	if snapshot.Run == nil {
@@ -113,7 +133,7 @@ func Build(snapshot coordinator.Snapshot, now time.Time) (Data, error) {
 	data.Verdict = verdictOf(*snapshot.Run)
 	data.Headline = headline(snapshot)
 	data.Warnings = warnings(snapshot.Run.Stats)
-	data.Charts, data.OmittedEnds = charts(snapshot)
+	data.Cards, data.OmittedEnds = charts(snapshot)
 
 	return data, nil
 }
@@ -129,6 +149,9 @@ func Render(w io.Writer, data Data) error {
 		"stamp":   func(t time.Time) string { return t.Format("2006-01-02 15:04:05 MST") },
 		"seconds": formatSeconds,
 		"code":    failureCode,
+		// Views and legend slots are numbered from one in the stylesheet, so
+		// that .s1 in the CSS is the first line in the SVG.
+		"slot": func(i int) int { return i + 1 },
 	}).Parse(reportTemplate)
 	if err != nil {
 		return fmt.Errorf("parse report template: %w", err)
@@ -232,7 +255,7 @@ func headline(snapshot coordinator.Snapshot) []Stat {
 
 // charts builds the four time-series charts, and reports how many endpoints
 // were left off the response-time chart.
-func charts(snapshot coordinator.Snapshot) ([]Chart, int) {
+func charts(snapshot coordinator.Snapshot) ([]Card, int) {
 	ticks := snapshot.Ticks
 	if len(ticks) < 2 {
 		return nil, 0
@@ -247,66 +270,274 @@ func charts(snapshot coordinator.Snapshot) ([]Chart, int) {
 		rps[i] = tick.RPS
 	}
 
-	out := []Chart{
-		{
+	out := []Card{
+		{Title: "Virtual users", Views: []Chart{{
 			Title:  "Virtual users",
 			Hint:   "concurrent simulated clients",
 			X:      xs,
 			Format: func(v float64) string { return formatCount(uint64(v)) },
 			Series: []Series{{Label: "VUs", Color: "#2a78d6", Points: vus, Fill: true}},
-		},
-		{
+		}}},
+		{Title: "Requests per second", Views: []Chart{{
 			Title:  "Requests per second",
 			Hint:   "throughput as measured by the generators",
 			X:      xs,
 			Format: func(v float64) string { return formatCount(uint64(v)) },
 			Series: []Series{{Label: "req/s", Color: "#1baf7a", Points: rps, Fill: true}},
-		},
+		}}},
 	}
 
 	names, omitted := chartedEndpoints(ticks)
 	if len(names) > 0 {
-		series := make([]Series, 0, len(names))
-		// Coloured by name within the charted set, exactly as the dashboard
-		// does, so a report and the live view agree.
-		byName := append([]string(nil), names...)
-		sort.Strings(byName)
-		slot := make(map[string]string, len(byName))
-		for i, name := range byName {
-			slot[name] = endpointColors[i%len(endpointColors)]
-		}
-
-		for _, name := range names {
-			points := make([]float64, len(ticks))
-			for i, tick := range ticks {
-				if point, ok := tick.Endpoints[name]; ok {
-					points[i] = point.Avg
-				}
-			}
-			series = append(series, Series{Label: name, Color: slot[name], Points: points})
-		}
-
-		out = append(out, Chart{
-			Title:  "Response time",
-			Hint:   "average per endpoint",
-			X:      xs,
-			Format: formatMillis,
-			Series: series,
-		})
+		out = append(out, responseTimeCard(snapshot, xs, names))
 	}
 
 	if status := statusSeries(ticks); len(status) > 0 {
-		out = append(out, Chart{
+		out = append(out, Card{Title: "Responses by status", Views: []Chart{{
 			Title:   "Responses by status",
 			Hint:    "stacked; transport failures counted separately",
 			X:       xs,
 			Format:  func(v float64) string { return formatCount(uint64(v)) },
 			Stacked: true,
 			Series:  status,
+		}}})
+	}
+
+	for i := range out {
+		out[i].Index = i
+	}
+	return out, omitted
+}
+
+// responseTimeCard builds the response-time figure's four views.
+//
+// The same measurements at four heights: the mean of everything, one line per
+// request, one per step of a scenario, and one per scenario. The last is a sum
+// rather than a mean — a pass waits for each of its steps in turn, so what a
+// pass costs is its steps' averages added together, which no average can say.
+func responseTimeCard(snapshot coordinator.Snapshot, xs []time.Time, names []string) Card {
+	ticks := snapshot.Ticks
+
+	total := make([]float64, len(ticks))
+	for i, tick := range ticks {
+		total[i] = tick.Avg
+	}
+
+	views := []Chart{
+		{
+			Name:   "Total",
+			Title:  "Response time",
+			Hint:   "mean across every request",
+			X:      xs,
+			Format: formatMillis,
+			Series: []Series{{Label: "average", Color: "#2a78d6", Points: total, Fill: true}},
+		},
+		{
+			Name:   "Individual",
+			Title:  "Response time",
+			Hint:   "average per endpoint",
+			X:      xs,
+			Format: formatMillis,
+			Series: endpointSeries(ticks, names),
+		},
+	}
+
+	// A step is a request; what the step view adds is the scenario each one
+	// belongs to, which the per-endpoint buckets cannot say. That association
+	// comes from the cumulative series, which carry both labels — and without
+	// it the view would be a copy of the one above, so it is not offered.
+	owners := scenariosByEndpoint(snapshot.Series)
+	if steps := stepSeries(ticks, names, owners); len(owners) > 0 && len(steps) > 0 {
+		views = append(views, Chart{
+			Name:   "Step",
+			Title:  "Response time",
+			Hint:   "average per step, grouped by scenario",
+			X:      xs,
+			Format: formatMillis,
+			Series: steps,
+		})
+	}
+	if scenarios := scenarioSeries(ticks, owners); len(scenarios) > 0 {
+		views = append(views, Chart{
+			Name:   "Scenario",
+			Title:  "Response time",
+			Hint:   "each scenario's own step averages summed",
+			X:      xs,
+			Format: formatMillis,
+			Series: scenarios,
 		})
 	}
 
-	return out, omitted
+	// The views read from coarsest to finest and back out to the scenario, as
+	// they do on the dashboard. Individual is the one a reader lands on, being
+	// the only one there was before the others existed.
+	return Card{Title: "Response time", Views: views, Default: 1}
+}
+
+// palette assigns a hue per name, by name rather than by rank.
+//
+// Sorting first means the colour follows the endpoint and not its position in
+// a ranking, so a report and the live dashboard agree, and two reports of the
+// same test agree with each other.
+func palette(names []string) map[string]string {
+	sorted := append([]string(nil), names...)
+	sort.Strings(sorted)
+
+	slot := make(map[string]string, len(sorted))
+	for i, name := range sorted {
+		slot[name] = endpointColors[i%len(endpointColors)]
+	}
+	return slot
+}
+
+// endpointSeries draws one line per request name.
+func endpointSeries(ticks []coordinator.TickDTO, names []string) []Series {
+	slot := palette(names)
+
+	series := make([]Series, 0, len(names))
+	for _, name := range names {
+		points := make([]float64, len(ticks))
+		for i, tick := range ticks {
+			if point, ok := tick.Endpoints[name]; ok {
+				points[i] = point.Avg
+			}
+		}
+		series = append(series, Series{Label: name, Color: slot[name], Points: points})
+	}
+	return series
+}
+
+// scenariosByEndpoint maps each request name to the scenarios that issue it.
+//
+// A name two scenarios share is listed under both: each of those scenarios
+// really does pay that request on every pass, so each one's total includes it.
+func scenariosByEndpoint(series []metrics.SeriesSummary) map[string][]string {
+	owners := map[string][]string{}
+
+	for _, entry := range series {
+		if entry.Metric != loadwave.MetricHTTPReqDuration {
+			continue
+		}
+		name := entry.Tags[loadwave.LabelName]
+		scenario := entry.Tags[loadwave.LabelScenario]
+		if name == "" || scenario == "" {
+			continue
+		}
+		if !slices.Contains(owners[name], scenario) {
+			owners[name] = append(owners[name], scenario)
+		}
+	}
+	return owners
+}
+
+// stepSeries draws one line per step, grouped under the scenario running it.
+//
+// A step two scenarios share gets a line under each; the two carry identical
+// numbers, the store having merged those requests by name.
+func stepSeries(ticks []coordinator.TickDTO, names []string, owners map[string][]string) []Series {
+	type step struct {
+		label    string
+		name     string
+		scenario string
+		rank     int
+	}
+
+	steps := make([]step, 0, len(names))
+	for rank, name := range names {
+		scenarios := owners[name]
+		if len(scenarios) == 0 {
+			steps = append(steps, step{label: name, name: name, rank: rank})
+			continue
+		}
+		for _, scenario := range scenarios {
+			steps = append(steps, step{
+				label:    scenario + " · " + name,
+				name:     name,
+				scenario: scenario,
+				rank:     rank,
+			})
+		}
+	}
+
+	// Grouped by scenario, busiest first within one. An unattributed step
+	// sorts last rather than leading the legend.
+	sort.SliceStable(steps, func(i, j int) bool {
+		left, right := steps[i], steps[j]
+		if left.scenario != right.scenario {
+			if left.scenario == "" {
+				return false
+			}
+			if right.scenario == "" {
+				return true
+			}
+			return left.scenario < right.scenario
+		}
+		return left.rank < right.rank
+	})
+	if len(steps) > maxChartedEndpoints {
+		steps = steps[:maxChartedEndpoints]
+	}
+
+	labels := make([]string, 0, len(steps))
+	for _, s := range steps {
+		labels = append(labels, s.label)
+	}
+	slot := palette(labels)
+
+	series := make([]Series, 0, len(steps))
+	for _, s := range steps {
+		points := make([]float64, len(ticks))
+		for i, tick := range ticks {
+			if point, ok := tick.Endpoints[s.name]; ok {
+				points[i] = point.Avg
+			}
+		}
+		series = append(series, Series{Label: s.label, Color: slot[s.label], Points: points})
+	}
+	return series
+}
+
+// scenarioSeries draws one line per scenario: what a pass through its own
+// steps costs, which is their averages summed.
+func scenarioSeries(ticks []coordinator.TickDTO, owners map[string][]string) []Series {
+	requests := map[string]uint64{}
+	for _, tick := range ticks {
+		for name, point := range tick.Scenarios {
+			requests[name] += point.Requests
+		}
+	}
+	if len(requests) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(requests))
+	for name := range requests {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if requests[names[i]] != requests[names[j]] {
+			return requests[names[i]] > requests[names[j]]
+		}
+		return names[i] < names[j]
+	})
+	if len(names) > maxChartedEndpoints {
+		names = names[:maxChartedEndpoints]
+	}
+	slot := palette(names)
+
+	series := make([]Series, 0, len(names))
+	for _, scenario := range names {
+		points := make([]float64, len(ticks))
+		for i, tick := range ticks {
+			for name, point := range tick.Endpoints {
+				if slices.Contains(owners[name], scenario) {
+					points[i] += point.Avg
+				}
+			}
+		}
+		series = append(series, Series{Label: scenario, Color: slot[scenario], Points: points})
+	}
+	return series
 }
 
 // chartedEndpoints picks the busiest endpoints, and counts the rest.

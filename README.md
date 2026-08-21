@@ -181,8 +181,13 @@ loadwave serve                     # long-lived; start runs from the browser
 ```
 
 Live charts for virtual users, throughput, response time and responses by
-status class. The response-time chart draws one line per endpoint — click any
-of them, or any row of the Requests table, to isolate it.
+status class. The response-time chart aggregates at whichever height you ask
+for: **Total** for the mean of every request, **Individual** for a line per
+request, **Step** for a line per step under the scenario that runs it, and
+**Scenario** for one line per scenario summing its own steps — what a single
+pass through it costs. Click any line, or any row of the Requests table, to
+highlight it; the rest dim rather than disappear, and several can be
+highlighted at once to compare them.
 
 Below the charts: a per-endpoint breakdown, threshold verdicts, agent health,
 an event log, and a **Failed requests** panel giving each failure's status
@@ -236,6 +241,12 @@ HTML file — charts included, as inline SVG — with no scripts, no external
 assets and no network dependency. It renders the same in an email client, as a
 ticket attachment, or opened in two years to settle an argument about when a
 regression started.
+
+The charts are still interactive. The report's response-time chart carries the
+same Total / Individual / Step / Scenario views the dashboard has, and clicking
+a name in any legend highlights that line and dims the rest. Both are radio
+buttons, checkboxes and CSS — no script was added, and a browser too old for
+the selectors simply shows every view at once.
 
 ---
 

@@ -665,3 +665,86 @@ scenarios:
 		}
 	}
 }
+
+// A count past the wire format's width must be refused, not wrapped.
+//
+// The failure this guards against is silent: on a 64-bit host a stage target
+// of five billion narrows to 705,032,704, and the run proceeds against a
+// profile nobody wrote.
+func TestPlanRejectsCountsTooLargeForTheWire(t *testing.T) {
+	t.Parallel()
+
+	const tooBig = 1 << 33 // Comfortably past uint32, exactly representable.
+
+	cases := []struct {
+		name  string
+		apply func(*scenario.Config)
+		want  string
+	}{
+		{
+			name:  "vus",
+			apply: func(c *scenario.Config) { c.Load.VUs = tooBig },
+			want:  "vus is too large",
+		},
+		{
+			name: "stage target",
+			apply: func(c *scenario.Config) {
+				c.Load.Stages = []scenario.StageConfig{
+					{Duration: scenario.Duration(time.Second), Target: tooBig},
+				}
+			},
+			want: "stage 1 target is too large",
+		},
+		{
+			name:  "scenario weight",
+			apply: func(c *scenario.Config) { c.Scenarios[0].Weight = tooBig },
+			want:  `scenario "browse" weight is too large`,
+		},
+		{
+			name:  "workers per agent",
+			apply: func(c *scenario.Config) { c.WorkersPerAgent = tooBig },
+			want:  "workersPerAgent is too large",
+		},
+		{
+			name:  "max iteration rate",
+			apply: func(c *scenario.Config) { c.Load.MaxIterationRate = tooBig },
+			want:  "maxIterationRate is too large",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := scenario.Parse([]byte(minimalConfig))
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			tc.apply(cfg)
+
+			plan, err := cfg.Plan()
+			if err == nil {
+				t.Fatalf("Plan accepted %d and produced %+v", tooBig, plan)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not name the field and the problem (%q)", err, tc.want)
+			}
+		})
+	}
+}
+
+// A negative count is the same bug wearing a different hat: it wraps to an
+// enormous one rather than a truncated one.
+func TestPlanRejectsNegativeCounts(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := scenario.Parse([]byte(minimalConfig))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg.WorkersPerAgent = -1
+
+	if _, err := cfg.Plan(); err == nil || !strings.Contains(err.Error(), "cannot be negative") {
+		t.Fatalf("Plan accepted a negative worker count: %v", err)
+	}
+}

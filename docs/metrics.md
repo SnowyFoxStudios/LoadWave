@@ -162,7 +162,10 @@ gigabytes. So the coordinator keeps:
   charts. The percentiles are computed from the merged histogram *before* it is
   released, so they are correct; the histogram itself is then discarded.
 - **Per-endpoint buckets** holding a sum and a count only, and therefore an
-  average. This is what the response-time chart plots one line from.
+  average. This is what the response-time chart plots one line from. They are
+  keyed by request name alone, so the dashboard's step and scenario rollups
+  take the request-to-scenario mapping from the cumulative series, which carry
+  both labels.
 
 The last of those is deliberately average-only. A histogram per endpoint per
 second would cost gigabytes over an hour, where a sum and a count cost

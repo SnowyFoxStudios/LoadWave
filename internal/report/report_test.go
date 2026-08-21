@@ -180,3 +180,64 @@ func TestReportSurvivesAnEmptyRun(t *testing.T) {
 		t.Error("an empty run should say so rather than showing an empty table")
 	}
 }
+
+// The response-time chart offers four aggregations, and switching between
+// them must not cost the report its one hard promise: no script.
+func TestReportChartViewsAreScriptFree(t *testing.T) {
+	t.Parallel()
+
+	snapshot := sampleSnapshot(false)
+	// Give the requests a scenario, which is where the step and scenario
+	// views get their grouping from.
+	snapshot.Series = []metrics.SeriesSummary{
+		{Metric: "http_req_duration", Tags: map[string]string{"name": "list products", "scenario": "browse"}},
+		{Metric: "http_req_duration", Tags: map[string]string{"name": "create order", "scenario": "checkout"}},
+		{Metric: "http_reqs", Tags: map[string]string{"name": "list products", "scenario": "browse"}},
+	}
+	snapshot.Ticks[10].Scenarios = map[string]coordinator.ScenarioTick{
+		"browse":   {Requests: 20},
+		"checkout": {Requests: 5},
+	}
+
+	html := render(t, snapshot)
+
+	for _, want := range []string{
+		// The four views, and the grouped labels only the step view has.
+		`>Total<`, `>Individual<`, `>Step<`, `>Scenario<`,
+		"browse · list products",
+		"checkout · create order",
+		// The switch itself: radio inputs and the selector that acts on them.
+		`type="radio"`,
+		".card:has(.v1:checked)",
+		// Highlighting hangs off the palette slot the SVG tags each line with.
+		`class="line s1"`,
+		".view:has(.p1:checked)",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("report is missing %q", want)
+		}
+	}
+
+	if strings.Contains(html, "<script") {
+		t.Error("the view switch introduced a script; it must be CSS alone")
+	}
+}
+
+// A run whose metrics carry no scenario still gets the views that do not need
+// one, rather than an empty switcher or a crash.
+func TestReportViewsSurviveMissingScenarios(t *testing.T) {
+	t.Parallel()
+
+	html := render(t, sampleSnapshot(false))
+
+	if !strings.Contains(html, `>Individual<`) || !strings.Contains(html, `>Total<`) {
+		t.Error("the scenario-free views should still be offered")
+	}
+	for _, unwanted := range []string{`>Step<`, `>Scenario<`} {
+		// Both views group by scenario. With no scenario to group by, Step
+		// would be a copy of Individual and Scenario would be empty.
+		if strings.Contains(html, unwanted) {
+			t.Errorf("%s was offered for a run with no scenario labels", unwanted)
+		}
+	}
+}

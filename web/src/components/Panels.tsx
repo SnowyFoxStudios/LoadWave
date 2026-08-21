@@ -103,9 +103,9 @@ export function EndpointTable({
   onSelect,
 }: {
   endpoints: EndpointSummary[];
-  /** The endpoint the response-time chart is isolated to, if any. */
-  selected?: string | null;
-  /** Called with a row's name when it is clicked. */
+  /** The endpoints currently highlighted on the response-time chart. */
+  selected?: ReadonlySet<string>;
+  /** Called with a row's name when it is clicked, to toggle its highlight. */
   onSelect?: (name: string) => void;
 }) {
   const [sort, setSort] = useState<SortKey>('p95');
@@ -176,7 +176,7 @@ export function EndpointTable({
       title="Requests"
       action={
         <span className="text-ink-3 text-xs">
-          {onSelect ? 'click a request name to chart it alone' : 'by name'}
+          {onSelect ? 'click request names to highlight them on the chart' : 'by name'}
         </span>
       }
     >
@@ -202,8 +202,8 @@ export function EndpointTable({
             {sorted.map((row) => (
               <tr
                 key={row.name}
-                aria-selected={selected === row.name}
-                className={cn(selected === row.name ? 'bg-accent-soft' : 'hover:bg-surface-2')}
+                aria-selected={selected?.has(row.name) ?? false}
+                className={cn(selected?.has(row.name) ? 'bg-accent-soft' : 'hover:bg-surface-2')}
               >
                 <th scope="row" className="max-w-[22rem] truncate px-3 py-2 text-left font-normal">
                   {onSelect ? (
@@ -212,9 +212,9 @@ export function EndpointTable({
                       onClick={() => onSelect(row.name)}
                       className="text-ink hover:text-accent cursor-pointer font-mono text-xs"
                       title={
-                        selected === row.name
-                          ? 'Show every endpoint on the chart again'
-                          : `Chart only ${row.name}`
+                        selected?.has(row.name)
+                          ? `Stop highlighting ${row.name}`
+                          : `Highlight ${row.name} on the chart`
                       }
                     >
                       {row.name}

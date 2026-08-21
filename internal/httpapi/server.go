@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/SnowyFoxStudios/LoadWave/internal/buildinfo"
 	"github.com/SnowyFoxStudios/LoadWave/internal/coordinator"
@@ -235,7 +236,7 @@ func (s *Server) withLogging(next http.Handler) http.Handler {
 
 		s.log.Debug("request",
 			"method", r.Method,
-			"path", r.URL.Path,
+			"path", logPath(r),
 			"status", recorder.status,
 			"duration", time.Since(started).Round(time.Millisecond))
 	})
@@ -251,12 +252,56 @@ func (s *Server) withRecovery(next http.Handler) http.Handler {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				s.log.Error("panic while handling a request",
-					"path", r.URL.Path, "panic", recovered)
+					"path", logPath(r), "panic", recovered)
 				writeError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// maxLoggedPath bounds how much of a request path reaches the log. Long enough
+// for any route this server actually serves, short enough that a client cannot
+// push anything else off the operator's screen.
+const maxLoggedPath = 256
+
+// logPath renders a request path safely for the log.
+//
+// The path is whatever the client sent, and `%0a` survives URL decoding into a
+// real newline — which is enough to forge a whole log line: a second "request"
+// entry that never happened, with a status of the attacker's choosing, in the
+// file an operator later reads as evidence. Control characters are replaced
+// rather than dropped so that a probe still shows up as a probe, and the
+// result is bounded.
+func logPath(r *http.Request) string {
+	path, truncated := r.URL.Path, false
+	if len(path) > maxLoggedPath {
+		// A cut here can land mid-rune; strings.Map below decodes the stray
+		// byte to U+FFFD, so the result is still valid UTF-8.
+		path, truncated = path[:maxLoggedPath], true
+	}
+
+	// The two that matter are named rather than left to the class check below:
+	// a newline is what lets a client end the entry and start one of its own,
+	// and a carriage return is what lets it overwrite the entry so far. Saying
+	// so explicitly is what a reader — and a static analyser — recognises as
+	// the defence against exactly that.
+	cleaned := strings.ReplaceAll(path, "\n", "\uFFFD")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "\uFFFD")
+
+	// Everything else unprintable goes the same way, so a terminal escape
+	// cannot repaint the operator's screen either.
+	cleaned = strings.Map(func(c rune) rune {
+		if unicode.IsControl(c) {
+			return '\uFFFD'
+		}
+		return c
+	}, cleaned)
+
+	if truncated {
+		return cleaned + "…"
+	}
+	return cleaned
 }
 
 // ---------------------------------------------------------------------------
