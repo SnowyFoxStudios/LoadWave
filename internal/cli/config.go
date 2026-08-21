@@ -195,11 +195,14 @@ func (f *planFlags) applyScenarios(cfg *scenario.Config) error {
 	for _, raw := range f.scenarios {
 		name, weight := raw, 1
 		if key, value, ok := strings.Cut(raw, "="); ok {
-			parsed, err := strconv.Atoi(strings.TrimSpace(value))
+			// Parsed at 32 bits, which is the width the wire format carries.
+			// A weight past it is a typo, and saying so beside the flag that
+			// has it beats narrowing it silently on the way to a plan.
+			parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 32)
 			if err != nil || parsed <= 0 {
-				return failf("--scenario %q: weight must be a positive integer", raw)
+				return failf("--scenario %q: weight must be a positive 32-bit integer", raw)
 			}
-			name, weight = key, parsed
+			name, weight = key, int(parsed)
 		}
 		name = strings.TrimSpace(name)
 
@@ -256,9 +259,11 @@ func parseStages(spec string) ([]scenario.StageConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stage %q: invalid duration: %w", part, err)
 		}
-		target, err := strconv.Atoi(strings.TrimSpace(rawTarget))
+		// As above: 32 bits, because that is what a stage target is on the
+		// wire. Five billion VUs is a slipped keystroke, not a request.
+		target, err := strconv.ParseInt(strings.TrimSpace(rawTarget), 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("stage %q: target must be a whole number", part)
+			return nil, fmt.Errorf("stage %q: target must be a whole 32-bit number", part)
 		}
 		if target < 0 {
 			return nil, fmt.Errorf("stage %q: target cannot be negative", part)
@@ -266,7 +271,7 @@ func parseStages(spec string) ([]scenario.StageConfig, error) {
 
 		stages = append(stages, scenario.StageConfig{
 			Duration: scenario.Duration(duration),
-			Target:   target,
+			Target:   int(target),
 		})
 	}
 

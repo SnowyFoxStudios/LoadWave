@@ -281,12 +281,22 @@ func logPath(r *http.Request) string {
 		path, truncated = path[:maxLoggedPath], true
 	}
 
-	cleaned := strings.Map(func(c rune) rune {
+	// The two that matter are named rather than left to the class check below:
+	// a newline is what lets a client end the entry and start one of its own,
+	// and a carriage return is what lets it overwrite the entry so far. Saying
+	// so explicitly is what a reader — and a static analyser — recognises as
+	// the defence against exactly that.
+	cleaned := strings.ReplaceAll(path, "\n", "\uFFFD")
+	cleaned = strings.ReplaceAll(cleaned, "\r", "\uFFFD")
+
+	// Everything else unprintable goes the same way, so a terminal escape
+	// cannot repaint the operator's screen either.
+	cleaned = strings.Map(func(c rune) rune {
 		if unicode.IsControl(c) {
 			return '\uFFFD'
 		}
 		return c
-	}, path)
+	}, cleaned)
 
 	if truncated {
 		return cleaned + "…"

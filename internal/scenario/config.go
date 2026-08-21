@@ -257,13 +257,16 @@ func (l *LoadConfig) validate() error {
 // for nor the one it wrapped to is what the author meant, and a load test that
 // quietly runs a different profile than the one written down is worse than one
 // that will not start.
-func asUint32(field string, v int) (uint32, error) {
+// The parameter is int64 rather than int so the bound can be written against
+// the value itself: `v > math.MaxUint32` on a plain int would not compile on a
+// 32-bit platform, and hiding the comparison behind a uint64 conversion puts
+// the guard on a different expression than the one being narrowed — harder for
+// the next reader, and for a static analyser, to see as a guard at all.
+func asUint32(field string, v int64) (uint32, error) {
 	if v < 0 {
 		return 0, fmt.Errorf("%s cannot be negative, got %d", field, v)
 	}
-	// Compared in uint64 rather than against an int constant, which would not
-	// compile on a 32-bit platform.
-	if uint64(v) > math.MaxUint32 {
+	if v > math.MaxUint32 {
 		return 0, fmt.Errorf("%s is too large: %d, the most that can be asked for is %d",
 			field, v, uint32(math.MaxUint32))
 	}
@@ -273,15 +276,15 @@ func asUint32(field string, v int) (uint32, error) {
 // Plan converts the configuration into the wire-format test plan the
 // coordinator distributes.
 func (c *Config) Plan() (*loadwavev1.TestPlan, error) {
-	vus, err := asUint32("vus", c.Load.VUs)
+	vus, err := asUint32("vus", int64(c.Load.VUs))
 	if err != nil {
 		return nil, err
 	}
-	rate, err := asUint32("maxIterationRate", c.Load.MaxIterationRate)
+	rate, err := asUint32("maxIterationRate", int64(c.Load.MaxIterationRate))
 	if err != nil {
 		return nil, err
 	}
-	workers, err := asUint32("workersPerAgent", c.WorkersPerAgent)
+	workers, err := asUint32("workersPerAgent", int64(c.WorkersPerAgent))
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +301,7 @@ func (c *Config) Plan() (*loadwavev1.TestPlan, error) {
 	case ExecutorRampingVUs:
 		load.Executor = loadwavev1.ExecutorType_EXECUTOR_TYPE_RAMPING_VUS
 		for i, s := range c.Load.Stages {
-			target, err := asUint32(fmt.Sprintf("stage %d target", i+1), s.Target)
+			target, err := asUint32(fmt.Sprintf("stage %d target", i+1), int64(s.Target))
 			if err != nil {
 				return nil, err
 			}
@@ -320,7 +323,7 @@ func (c *Config) Plan() (*loadwavev1.TestPlan, error) {
 	}
 
 	for _, s := range c.Scenarios {
-		weight, err := asUint32(fmt.Sprintf("scenario %q weight", s.Name), max(1, s.Weight))
+		weight, err := asUint32(fmt.Sprintf("scenario %q weight", s.Name), int64(max(1, s.Weight)))
 		if err != nil {
 			return nil, err
 		}
