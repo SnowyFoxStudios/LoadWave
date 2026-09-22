@@ -5,6 +5,7 @@ package loadwave
 
 import (
 	"hash/maphash"
+	"math"
 	"slices"
 	"strings"
 )
@@ -61,6 +62,9 @@ func (l Labels) With(kv ...string) Labels {
 
 // buildLabels merges `extra` over `base` and returns a fully-built Labels.
 func buildLabels(base, extra []string) Labels {
+	if len(extra) > math.MaxInt-len(base) {
+		panic("loadwave: label set too large")
+	}
 	merged := make([]string, 0, len(base)+len(extra))
 	merged = append(merged, base...)
 
