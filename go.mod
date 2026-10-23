@@ -3,7 +3,7 @@ module github.com/SnowyFoxStudios/LoadWave
 go 1.26.6
 
 require (
-	github.com/HdrHistogram/hdrhistogram-go v1.3.0
+	github.com/HdrHistogram/hdrhistogram-go v1.4.0
 	github.com/coder/websocket v1.8.15
 	github.com/goccy/go-yaml v1.19.2
 	github.com/shirou/gopsutil/v4 v4.26.9
